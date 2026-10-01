@@ -25,6 +25,9 @@
       Acct-Input-Gigawords = 1
       Acct-Output-Octets = 5678
       Acct-Delay-Time = 10
+      {% if __freeradius_test_acct_timestamp is defined %}
+      Event-Timestamp = {{ __freeradius_test_acct_timestamp }}
+      {% endif %}
       {{ 'NAS-IP-Address = 127.0.0.1' if __freeradius_test_send_nas_address | default(true) else '' }}
   changed_when: false
   failed_when: false

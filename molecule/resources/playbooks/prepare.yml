@@ -14,6 +14,10 @@
       Debian: eapoltest
       RedHat: wpa_supplicant
       Suse: wpa_supplicant
+    __freeradius_timezone_packages:
+      Debian: tzdata
+      RedHat: tzdata
+      Suse: timezone
   tasks:
     - name: FREERADIUS | Refresh APT package metadata
       become: true
@@ -35,8 +39,15 @@
           - python3-psycopg2
           - "{{ __freeradius_eap_test_packages[ansible_facts.os_family] }}"
           - "{{ __freeradius_packages[0] }}"
+          - "{{ __freeradius_timezone_packages[ansible_facts.os_family] }}"
           - openssl
         state: present
+
+    - name: FREERADIUS | Exercise accounting in a timezone with daylight saving
+      become: true
+      become_user: root
+      community.general.timezone:
+        name: Europe/Berlin
 
     - name: FREERADIUS | Generate temporary certificate authorities and client profiles
       become: true

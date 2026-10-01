@@ -23,12 +23,16 @@
       vars:
         __freeradius_test_acct_session: sql-lifecycle
         __freeradius_test_send_nas_address: "{{ __freeradius_test_acct_status != 'Start' }}"
+        # 2024-03-31 00:59:30/01:00:30 UTC straddle Berlin's CET/CEST transition.
+        __freeradius_test_acct_timestamp: "{{ 1711846830 if __freeradius_test_acct_status == 'Interim-Update' else 1711846770 }}"
 
     - name: FREERADIUS | Wait for one updated SQL session
       community.postgresql.postgresql_query:
         query: >-
           SELECT count(*) AS sessions, max(acctinputoctets) AS received,
                  max(acctoutputoctets) AS sent, max(acctsessiontime) AS duration,
+                 extract(epoch FROM max(acctstarttime))::bigint AS started,
+                 extract(epoch FROM max(acctupdatetime))::bigint AS updated,
                  bool_and(acctstoptime IS NULL) AS active
           FROM radacct WHERE acctsessionid = 'sql-lifecycle'
       register: __freeradius_sql_session
@@ -37,6 +41,8 @@
         - __freeradius_sql_session.query_result[0].received == 4294968530
         - __freeradius_sql_session.query_result[0].sent == 5678
         - __freeradius_sql_session.query_result[0].duration == 60
+        - __freeradius_sql_session.query_result[0].started == 1711846770
+        - __freeradius_sql_session.query_result[0].updated == 1711846830
         - __freeradius_sql_session.query_result[0].active
       retries: 30
       delay: 2
@@ -47,12 +53,13 @@
       vars:
         __freeradius_test_acct_status: Stop
         __freeradius_test_acct_session: sql-lifecycle
+        __freeradius_test_acct_timestamp: 1711846830
 
     - name: FREERADIUS | Wait for closed SQL session
       community.postgresql.postgresql_query:
         query: >-
           SELECT count(*) AS sessions FROM radacct
-          WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime IS NOT NULL
+          WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime = to_timestamp(1711846830)
       register: __freeradius_sql_stop
       until: __freeradius_sql_stop.query_result[0].sessions == 1
       retries: 30
