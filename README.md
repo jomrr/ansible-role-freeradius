@@ -575,75 +575,50 @@ reapplied with the same inputs.
 
 ## Operational Notes
 
-- [Molecule scenarios](molecule/README.md) check RADIUS responses on the
-  supported server platforms. Actual VLAN, PPP profile, pool and filter
-  enforcement requires a separate hardware check on the deployed UniFi/MikroTik
-  devices; it is not covered by these tests.
+- The role replaces radiusd.conf and user; freeradius_clients and
+  freeradius_users are authoritative. An empty freeradius_users list disables
+  local PAP authentication, while EAP-TLS and accounting remain independent of
+  that list.
 - freeradius_authorization_enabled requires a matching user access grant and a
   client with services: [vpn]. Profiles are applied only after successful
   authentication and session checks. Disabled authorization preserves
   credential-only PAP.
-- MAB additionally requires freeradius_mab_enabled and the client service mab.
-  Select mab_service_type to match the NAS: UniFi typically sends Call-Check,
-  RouterOS dot1x can send Framed-User. Confirm the attributes on the deployed
-  firmware.
-- MAC case and plain, colon, hyphen or dotted notation are normalized. Valid
-  matching MAC credentials without a device grant receive the quarantine
-  profile; malformed or inconsistent credentials are rejected. No user login
-  falls back to quarantine. Empty device lists quarantine all valid MAB
-  requests. MAC admission bypasses PAP attempt and SQL session limits.
-- The role replaces radiusd.conf and the local users file. Client and user lists
-  are authoritative. An empty freeradius_users list disables local user
-  authentication; enabled accounting accepts records from configured clients
-  independently of the local user list.
-- User passwords must match freeradius_password_attribute, with an optional
-  per-user password_attribute override. The default Crypt-Password accepts
-  SHA-512 crypt or yescrypt hashes; yescrypt requires support in the target
-  system's libcrypt.
+- freeradius_mab_enabled requires enabled authorization, client service mab and
+  mab_service_type matching the NAS request. Valid MAC credentials without a
+  matching device grant receive freeradius_mab_quarantine_profile; an empty
+  freeradius_mab_devices list quarantines all valid MAB requests. MAB bypasses
+  PAP attempt and SQL session limits.
+- Password values must match freeradius_password_attribute or the per-user
+  password_attribute override. The default Crypt-Password accepts SHA-512 crypt
+  or yescrypt; yescrypt requires support in the target system's libcrypt.
 - Reaching freeradius_failure_limit blocks further PAP requests, including valid
   passwords, until freeradius_failure_window expires. Success before the limit
   resets the counter. Counters reset on restart and are not shared between
   servers.
-- Enable freeradius_accounting_enabled for accounting, using UDP 1813 by
-  default. The detail backend writes to accounting/detail. The postgresql
-  backend forwards accounting asynchronously; database outages leave PAP
-  available unless a session limit is enabled.
-- Configure external logrotate retention for the fixed detail file in detail
-  mode. The role does not install a rotation policy. Existing detail-YYYYMMDD
-  files are not renamed or removed; handle their retention separately.
-- SQL mode writes dated detail-YYYYMMDD queue files and consumes detail-* files,
-  removing processed files. The fixed detail file is not imported into SQL. Keep
-  pending queue files unchanged on persistent local storage, outside log
-  rotation, and monitor free space. Buffering covers database outages, but does
-  not guarantee durability on storage failure. Status types without a SQL query
-  are skipped; database errors remain queued.
+- freeradius_accounting_enabled enables accounting on freeradius_accounting_port
+  (default 1813). freeradius_accounting_backend selects detail for
+  accounting/detail or postgresql for asynchronous SQL delivery. Database
+  outages leave records queued locally and PAP available unless
+  freeradius_simultaneous_use is enabled.
 - Enable freeradius_postgresql_initialize_schema to initialize an empty
   database. While enabled, every role run requires database connectivity and
   freeradius_postgresql_schema_user/password; disable it after initialization if
   convergence must work during database outages. The role grants public schema
   USAGE, SELECT/INSERT/UPDATE on radacct and USAGE on radacct_radacctid_seq.
-  With initialization disabled, provision these permissions externally. Owner
-  credentials are not written to the RADIUS configuration.
-- Existing installations using an owner login need a restricted runtime login
-  and DBA-managed ownership/privilege migration before initialization. Rotate
-  previously deployed owner credentials, including those retained in
-  configuration backups. Runtime DML still permits accounting data changes.
-- freeradius_simultaneous_use applies to local PAP users and requires
-  PostgreSQL; zero disables the limit. Only open sessions updated within
-  freeradius_simultaneous_use_max_age seconds (default 900) count; stale records
-  remain stored. Configure NAS Interim-Updates more frequently, for example
-  every 300 seconds, allowing for accounting delivery and queue delays. Reaching
-  the limit or a failed SQL lookup rejects admission. Missing or delayed updates
-  and parallel logins can permit additional sessions.
-- EAP-TLS authenticates independently of freeradius_users. Exactly one
-  configured policy OID must match; missing or ambiguous matches and policy
-  qualifiers are rejected. TLS 1.2 and 1.3 are enabled; session resumption is
-  disabled.
-- CRL mode requires an OpenSSL-rehashed directory with current CA certificates
-  and CRLs for the full chain; it reloads every 300 seconds. OCSP mode requires
-  the configured responder to support nonces. Both modes reject failed
-  revocation checks. Certificate provisioning and renewal are external; restart
-  FreeRADIUS after replacing its certificate or key.
+  With initialization disabled, provision these permissions externally.
+- freeradius_simultaneous_use limits local PAP sessions through PostgreSQL; zero
+  disables the limit. Configure NAS Interim-Updates more frequently than
+  freeradius_simultaneous_use_max_age (default 900 seconds), allowing for
+  delivery delays. Only recently updated open sessions count. Reaching the limit
+  or a failed SQL lookup rejects admission; missing updates and parallel logins
+  can permit additional sessions.
+- freeradius_eap_tls_enabled enables certificate authentication. Exactly one OID
+  from freeradius_eap_tls_vlan_policies must match; missing or ambiguous matches
+  and policy qualifiers are rejected.
+- freeradius_eap_tls_revocation selects revocation checking. CRL mode requires
+  an OpenSSL-rehashed CA/CRL directory; OCSP mode requires a responder
+  supporting nonces. Both reject failed checks; none disables revocation
+  checking. Restart FreeRADIUS after replacing its certificate or key.
 
 ## Supported Platforms
 
