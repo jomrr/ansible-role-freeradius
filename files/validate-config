@@ -1,0 +1,13 @@
+#!/bin/sh
+# Adapt FreeRADIUS's directory-based validator to an Ansible template candidate.
+set -eu
+
+daemon=$1
+configuration=$2
+candidate=$3
+validation_dir=$(mktemp -d)
+trap 'rm -rf "$validation_dir"' EXIT HUP INT TERM
+
+cp "$candidate" "$validation_dir/radiusd.conf"
+ln -s "$configuration/dictionary" "$validation_dir/dictionary"
+"$daemon" -C -l stdout -d "$validation_dir"

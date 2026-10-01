@@ -1,0 +1,17 @@
+---
+# role: freeradius
+# file: meta/main.yml
+
+galaxy_info:
+  author: Jonas Mauer
+  description: Install and configure a FreeRADIUS server with explicit clients and local PAP authentication.
+  galaxy_tags:
+    - radius
+    - freeradius
+    - authentication
+    - networking
+  issue_tracker_url: https://github.com/jomrr/ansible-role-freeradius/issues
+  license: MIT
+  min_ansible_version: "2.20"
+  namespace: jomrr
+  role_name: freeradius

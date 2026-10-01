@@ -1,0 +1,67 @@
+---
+# role: freeradius
+# file: tasks/assert.yml
+
+- name: FREERADIUS | Validate listener and unique identities
+  ansible.builtin.assert:
+    that:
+      - freeradius_listen_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\Z')
+      - freeradius_port >= 1
+      - freeradius_port <= 65535
+      - freeradius_clients | map(attribute='name') | unique | length == freeradius_clients | length
+      - freeradius_users | map(attribute='name') | unique | length == freeradius_users | length
+    quiet: true
+
+- name: FREERADIUS | Validate client identifiers
+  ansible.builtin.assert:
+    that:
+      - __freeradius_client_name is match('^[A-Za-z0-9_-]+\Z')
+    quiet: true
+  loop: "{{ freeradius_clients | map(attribute='name') }}"
+  loop_control:
+    loop_var: __freeradius_client_name
+    label: "{{ __freeradius_client_name }}"
+
+- name: FREERADIUS | Validate client network syntax
+  ansible.builtin.assert:
+    that:
+      - __freeradius_client_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?\Z')
+    quiet: true
+  loop: "{{ freeradius_clients | map(attribute='address') }}"
+  loop_control:
+    loop_var: __freeradius_client_address
+    label: "{{ __freeradius_client_address }}"
+
+- name: FREERADIUS | Validate shared secret length and literal syntax
+  ansible.builtin.assert:
+    that:
+      - __freeradius_client.secret is match('^[A-Za-z0-9._~!@#%^&*+=:/?-]{16,128}\Z')
+    quiet: true
+  loop: "{{ freeradius_clients }}"
+  loop_control:
+    loop_var: __freeradius_client
+    label: "{{ __freeradius_client.name }}"
+  no_log: true
+
+- name: FREERADIUS | Validate local usernames
+  ansible.builtin.assert:
+    that:
+      - __freeradius_username is match('^[A-Za-z0-9_.@-]+\Z')
+      - __freeradius_username != 'DEFAULT'
+    quiet: true
+  loop: "{{ freeradius_users | map(attribute='name') }}"
+  loop_control:
+    loop_var: __freeradius_username
+    label: "{{ __freeradius_username }}"
+
+- name: FREERADIUS | Validate single-line passwords
+  ansible.builtin.assert:
+    that:
+      - __freeradius_account.password | length > 0
+      - __freeradius_account.password is not search('[\x00\r\n]')
+    quiet: true
+  loop: "{{ freeradius_users }}"
+  loop_control:
+    loop_var: __freeradius_account
+    label: "{{ __freeradius_account.name }}"
+  no_log: true

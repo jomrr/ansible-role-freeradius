@@ -1,0 +1,14 @@
+---
+# role: freeradius
+# file: vars/Suse.yml
+
+__freeradius_packages:
+  - freeradius-server
+__freeradius_service: radiusd
+__freeradius_daemon: /usr/sbin/radiusd
+__freeradius_config_dir: /etc/raddb
+__freeradius_lib_dir: /usr/lib64/freeradius
+__freeradius_run_dir: /run/radiusd
+__freeradius_user: radiusd
+__freeradius_group: radiusd
+__freeradius_validate_config: /usr/local/libexec/freeradius-validate-config /usr/sbin/radiusd /etc/raddb %s

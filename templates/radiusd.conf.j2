@@ -1,0 +1,71 @@
+# Managed by ansible.
+# file: {{ template_destpath }}
+
+prefix = /usr
+name = {{ __freeradius_service }}
+libdir = {{ __freeradius_lib_dir }}
+run_dir = {{ __freeradius_run_dir }}
+pidfile = ${run_dir}/${name}.pid
+hostname_lookups = no
+max_request_time = 30
+max_requests = 16384
+cleanup_delay = 5
+proxy_requests = no
+
+log {
+    destination = syslog
+    syslog_facility = daemon
+    auth = no
+    auth_badpass = no
+    auth_goodpass = no
+}
+
+security {
+    user = {{ __freeradius_user }}
+    group = {{ __freeradius_group }}
+    allow_core_dumps = no
+    max_attributes = 200
+    reject_delay = 1
+    status_server = no
+}
+
+thread pool {
+    start_servers = 2
+    max_servers = 16
+    min_spare_servers = 1
+    max_spare_servers = 4
+}
+
+{% for __freeradius_client in freeradius_clients %}
+client {{ __freeradius_client.name }} {
+    ipaddr = {{ __freeradius_client.address }}
+    secret = "{{ __freeradius_client.secret }}"
+    require_message_authenticator = yes
+}
+
+{% endfor %}
+modules {
+    files {
+        filename = {{ __freeradius_config_dir }}/ansible-users
+    }
+    pap {
+        normalise = yes
+    }
+}
+
+server default {
+    listen {
+        type = auth
+        ipaddr = {{ freeradius_listen_address }}
+        port = {{ freeradius_port }}
+    }
+    authorize {
+        files
+        pap
+    }
+    authenticate {
+        Auth-Type PAP {
+            pap
+        }
+    }
+}

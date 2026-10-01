@@ -1,0 +1,23 @@
+---
+# role: freeradius
+# file: defaults/main.yml
+
+# IPv4 address of the UDP authentication listener.
+freeradius_listen_address: 127.0.0.1
+
+# UDP authentication port, from 1 to 65535.
+freeradius_port: 1812
+
+# Authoritative RADIUS clients, all requiring Message-Authenticator.
+freeradius_clients: []
+# - name: access_switch
+#   address: 192.0.2.20
+#   secret: "{{ vault_radius_client_secret }}"
+
+# Authoritative local PAP users with nonempty single-line passwords.
+freeradius_users: []
+# - name: alice
+#   password: "{{ vault_radius_alice_password }}"
+
+# Back up managed configuration, including any credentials it contains.
+freeradius_backup: false

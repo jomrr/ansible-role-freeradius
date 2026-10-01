@@ -1,0 +1,54 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/authenticate.yml
+
+- name: FREERADIUS | Send valid authentication request
+  ansible.builtin.command:
+    argv:
+      - radclient
+      - -x
+      - -r
+      - '1'
+      - -t
+      - '3'
+      - "127.0.0.1:{{ __freeradius_test_port }}"
+      - auth
+      - "{{ __freeradius_test_secret }}"
+    stdin: |
+      User-Name = "molecule"
+      User-Password = "{{ __freeradius_test_password }}"
+      Message-Authenticator = 0x00
+  changed_when: false
+  register: __freeradius_accept
+
+- name: FREERADIUS | Verify Access-Accept
+  ansible.builtin.assert:
+    that:
+      - "'Access-Accept' in __freeradius_accept.stdout"
+    quiet: true
+
+- name: FREERADIUS | Send invalid authentication request
+  ansible.builtin.command:
+    argv:
+      - radclient
+      - -x
+      - -r
+      - '1'
+      - -t
+      - '3'
+      - "127.0.0.1:{{ __freeradius_test_port }}"
+      - auth
+      - "{{ __freeradius_test_secret }}"
+    stdin: |
+      User-Name = "molecule"
+      User-Password = "{{ __freeradius_rejected_password }}"
+      Message-Authenticator = 0x00
+  changed_when: false
+  failed_when: false
+  register: __freeradius_reject
+
+- name: FREERADIUS | Verify Access-Reject
+  ansible.builtin.assert:
+    that:
+      - "'Access-Reject' in __freeradius_reject.stdout"
+    quiet: true

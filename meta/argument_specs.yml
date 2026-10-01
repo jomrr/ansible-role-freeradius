@@ -1,0 +1,59 @@
+---
+# role: freeradius
+# file: meta/argument_specs.yml
+
+argument_specs:
+  main:
+    short_description: Configure FreeRADIUS clients and local PAP users.
+    options:
+      freeradius_listen_address:
+        type: str
+        default: 127.0.0.1
+        description: IPv4 address on which to accept authentication requests.
+      freeradius_port:
+        type: int
+        default: 1812
+        description: UDP authentication port, from 1 to 65535.
+      freeradius_clients:
+        type: list
+        elements: dict
+        default: []
+        description: Authoritative list of RADIUS clients; every client must send Message-Authenticator.
+        options:
+          name:
+            type: str
+            required: true
+            description: Unique client identifier containing letters, digits, underscores
+              or hyphens.
+          address:
+            type: str
+            required: true
+            description: IPv4 address or CIDR network permitted to send RADIUS requests.
+          secret:
+            type: str
+            required: true
+            no_log: true
+            description: Shared secret of 16 to 128 characters; letters, digits and ._~!@#%^&*+=:/?-
+              are accepted.
+      freeradius_users:
+        type: list
+        elements: dict
+        default: []
+        description: Authoritative local PAP users; an empty list denies all authentication.
+        options:
+          name:
+            type: str
+            required: true
+            description: Unique username containing letters, digits, dots, underscores,
+              at signs or hyphens; DEFAULT is reserved.
+          password:
+            type: str
+            required: true
+            no_log: true
+            description: Nonempty single-line cleartext password; store the inventory value
+              in Ansible Vault.
+      freeradius_backup:
+        type: bool
+        default: false
+        description: Back up managed configuration before replacement; backups can contain
+          credentials.

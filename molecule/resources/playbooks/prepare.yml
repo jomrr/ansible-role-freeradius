@@ -1,0 +1,26 @@
+---
+# role: freeradius
+# file: molecule/resources/playbooks/prepare.yml
+
+- name: FREERADIUS | Prepare protocol tests
+  hosts: all
+  gather_facts: true
+  vars:
+    __freeradius_test_packages:
+      Debian: freeradius-utils
+      RedHat: freeradius-utils
+      Suse: freeradius-server-utils
+  tasks:
+    - name: FREERADIUS | Refresh APT package metadata
+      become: true
+      become_user: root
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_facts.pkg_mgr == 'apt'
+
+    - name: FREERADIUS | Install RADIUS protocol test client
+      become: true
+      become_user: root
+      ansible.builtin.package:
+        name: "{{ __freeradius_test_packages[ansible_facts.os_family] }}"
+        state: present

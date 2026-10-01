@@ -1,0 +1,14 @@
+---
+# role: freeradius
+# file: vars/Debian.yml
+
+__freeradius_packages:
+  - freeradius
+__freeradius_service: freeradius
+__freeradius_daemon: /usr/sbin/freeradius
+__freeradius_config_dir: /etc/freeradius/3.0
+__freeradius_lib_dir: /usr/lib/freeradius
+__freeradius_run_dir: /run/freeradius
+__freeradius_user: freerad
+__freeradius_group: freerad
+__freeradius_validate_config: /usr/local/libexec/freeradius-validate-config /usr/sbin/freeradius /etc/freeradius/3.0 %s

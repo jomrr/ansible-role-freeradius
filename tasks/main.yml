@@ -1,0 +1,94 @@
+---
+# role: freeradius
+# file: tasks/main.yml
+
+- name: FREERADIUS | Validate input constraints
+  ansible.builtin.import_tasks: assert.yml
+
+- name: FREERADIUS | Load platform settings
+  ansible.builtin.include_vars: "{{ lookup('ansible.builtin.first_found', __freeradius_platform_files) }}"
+  vars:
+    __freeradius_platform_files:
+      files:
+        - "{{ ansible_facts.os_family }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+
+- name: FREERADIUS | Install server
+  become: true
+  become_user: root
+  ansible.builtin.package:
+    name: "{{ __freeradius_packages }}"
+    state: present
+
+- name: FREERADIUS | Create configuration validator directory
+  become: true
+  become_user: root
+  ansible.builtin.file:
+    path: /usr/local/libexec
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: FREERADIUS | Install configuration validator
+  become: true
+  become_user: root
+  ansible.builtin.copy:
+    src: validate-config
+    dest: /usr/local/libexec/freeradius-validate-config
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: FREERADIUS | Configure local users
+  become: true
+  become_user: root
+  ansible.builtin.template:
+    src: users.j2
+    dest: "{{ __freeradius_config_dir }}/ansible-users"
+    owner: root
+    group: "{{ __freeradius_group }}"
+    mode: '0640'
+    backup: "{{ freeradius_backup }}"
+  no_log: true
+  diff: false
+  notify: restart radius
+
+- name: FREERADIUS | Configure authentication server
+  become: true
+  become_user: root
+  ansible.builtin.template:
+    src: radiusd.conf.j2
+    dest: "{{ __freeradius_config_dir }}/radiusd.conf"
+    owner: root
+    group: "{{ __freeradius_group }}"
+    mode: '0640'
+    backup: "{{ freeradius_backup }}"
+    validate: "{{ __freeradius_validate_config }}"
+  no_log: true
+  diff: false
+  notify: restart radius
+
+- name: FREERADIUS | Validate complete installed configuration
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv:
+      - "{{ __freeradius_daemon }}"
+      - -C
+      - -l
+      - stdout
+  changed_when: false
+  no_log: true
+
+- name: FREERADIUS | Apply configuration changes
+  ansible.builtin.meta: flush_handlers
+
+- name: FREERADIUS | Enable and start authentication service
+  become: true
+  become_user: root
+  ansible.builtin.service:
+    name: "{{ __freeradius_service }}"
+    enabled: true
+    state: started

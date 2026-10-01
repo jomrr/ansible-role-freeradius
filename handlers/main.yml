@@ -1,0 +1,11 @@
+---
+# role: freeradius
+# file: handlers/main.yml
+
+- name: FREERADIUS | Restart authentication service
+  become: true
+  become_user: root
+  ansible.builtin.service:
+    name: "{{ __freeradius_service }}"
+    state: restarted
+  listen: restart radius

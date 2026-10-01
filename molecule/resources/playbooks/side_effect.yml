@@ -1,0 +1,84 @@
+---
+# role: freeradius
+# file: molecule/resources/playbooks/side_effect.yml
+
+- name: FREERADIUS | Exercise updates and service recovery
+  hosts: all
+  gather_facts: true
+  vars:
+    freeradius_port: 11812
+    freeradius_clients:
+      - name: replacement
+        address: 127.0.0.1
+        secret: molecule-rotated-secret-2026
+    freeradius_users:
+      - name: molecule
+        password: molecule-rotated-password
+  tasks:
+    - name: FREERADIUS | Rotate credentials and move the listener
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+        public: true
+
+    - name: FREERADIUS | Verify changed authentication and password revocation
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_port: 11812
+        __freeradius_test_secret: molecule-rotated-secret-2026
+        __freeradius_test_password: molecule-rotated-password
+        __freeradius_rejected_password: molecule-password
+
+    - name: FREERADIUS | Stop and disable the service
+      become: true
+      become_user: root
+      ansible.builtin.service:
+        name: "{{ __freeradius_service }}"
+        enabled: false
+        state: stopped
+
+    - name: FREERADIUS | Restore service with unchanged configuration
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+
+    - name: FREERADIUS | Verify recovered authentication
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_port: 11812
+        __freeradius_test_secret: molecule-rotated-secret-2026
+        __freeradius_test_password: molecule-rotated-password
+        __freeradius_rejected_password: molecule-password
+
+- name: FREERADIUS | Exercise empty access lists
+  hosts: all
+  gather_facts: true
+  vars:
+    freeradius_clients: []
+    freeradius_users: []
+  roles:
+    - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+  tasks:
+    - name: FREERADIUS | Send request from a removed client
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '1'
+          - 127.0.0.1:1812
+          - auth
+          - molecule-radius-secret-2026
+        stdin: |
+          User-Name = "molecule"
+          User-Password = "molecule-password"
+          Message-Authenticator = 0x00
+      changed_when: false
+      failed_when: false
+      register: __freeradius_removed_client
+
+    - name: FREERADIUS | Verify removed client receives no response
+      ansible.builtin.assert:
+        that:
+          - "'No reply from server' in __freeradius_removed_client.stdout"
+        quiet: true
