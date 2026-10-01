@@ -53,6 +53,8 @@ collections:
     version: '>=12.0.0'
   - name: community.postgresql
     version: '>=4.2.0'
+  - name: containers.podman
+    version: '>=1.20.0'
 ```
 
 ## Role Variables
