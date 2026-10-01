@@ -14,6 +14,7 @@
       - freeradius_accounting_backend != 'postgresql' or freeradius_accounting_enabled
       - not freeradius_postgresql_initialize_schema or freeradius_accounting_backend == 'postgresql'
       - freeradius_simultaneous_use >= 0
+      - freeradius_simultaneous_use_max_age > 0
       - freeradius_simultaneous_use == 0 or freeradius_accounting_backend == 'postgresql'
       - freeradius_failure_limit >= 1
       - freeradius_failure_limit <= 1000

@@ -43,8 +43,11 @@ freeradius_postgresql_ssl_root_cert: ''
 # Initialize the distribution FreeRADIUS schema in an existing empty database.
 freeradius_postgresql_initialize_schema: false
 
-# Maximum open SQL sessions per local PAP user; zero disables admission checks.
+# Maximum recent open SQL sessions per local PAP user; zero disables admission checks.
 freeradius_simultaneous_use: 0
+
+# Maximum age in seconds of the last accounting update counted toward the PAP session limit.
+freeradius_simultaneous_use_max_age: 900
 
 # Authoritative RADIUS clients, all requiring Message-Authenticator.
 freeradius_clients: []

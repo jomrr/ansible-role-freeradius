@@ -7,6 +7,7 @@
   gather_facts: true
   vars:
     freeradius_postgresql_initialize_schema: false
+    freeradius_simultaneous_use_max_age: 600
     __freeradius_test_port: 1812
     __freeradius_test_secret: molecule-radius-secret-2026
     __freeradius_test_password: molecule-password
@@ -95,6 +96,40 @@
       changed_when: false
 
     - name: FREERADIUS | Verify Simultaneous-Use rejects another login
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_expected_auth_response: Access-Reject
+
+    - name: FREERADIUS | Age the open session beyond the configured ten-minute window
+      community.postgresql.postgresql_query:
+        query: >-
+          UPDATE radacct
+          SET acctstarttime = CURRENT_TIMESTAMP - INTERVAL '11 minutes',
+              acctupdatetime = CURRENT_TIMESTAMP - INTERVAL '11 minutes'
+          WHERE acctsessionid = 'outage-session' AND acctstoptime IS NULL
+
+    - name: FREERADIUS | Verify a stale session permits a new login
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+
+    - name: FREERADIUS | Refresh the open session with an interim update
+      ansible.builtin.include_tasks: ../tasks/accounting.yml
+      vars:
+        __freeradius_test_acct_session: outage-session
+        __freeradius_test_acct_status: Interim-Update
+
+    - name: FREERADIUS | Wait for SQL session refresh
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT count(*) AS sessions FROM radacct
+          WHERE acctsessionid = 'outage-session' AND acctstoptime IS NULL
+            AND acctupdatetime > acctstarttime
+      register: __freeradius_sql_refreshed
+      until: __freeradius_sql_refreshed.query_result[0].sessions == 1
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: FREERADIUS | Verify the refreshed session again denies admission
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
         __freeradius_expected_auth_response: Access-Reject

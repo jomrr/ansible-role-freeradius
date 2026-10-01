@@ -32,8 +32,8 @@ UDP.
   checks; CRL or OCSP revocation and dynamic VLAN replies.
 - Optional accounting to local detail files or asynchronously to PostgreSQL,
   including PostgreSQL connection and TLS settings.
-- Optional PostgreSQL schema initialization and login limits based on open SQL
-  accounting sessions.
+- Optional PostgreSQL schema initialization and login limits based on recently
+  updated open SQL accounting sessions.
 
 ### Not Managed
 
@@ -370,13 +370,27 @@ freeradius_postgresql_initialize_schema: false
 
 Type: `int`. Required: `false`.
 
-Open SQL sessions allowed per local PAP user; zero disables checking, positive
-values require postgresql.
+Recent open SQL sessions allowed per local PAP user; zero disables checking,
+positive values require postgresql.
 
 Default:
 
 ```yaml
 freeradius_simultaneous_use: 0
+```
+
+### `freeradius_simultaneous_use_max_age`
+
+Type: `int`. Required: `false`.
+
+Positive maximum age in seconds of acctupdatetime for sessions counted by
+freeradius_simultaneous_use. Requires NAS Interim-Updates at a shorter interval
+with headroom for accounting delivery delays.
+
+Default:
+
+```yaml
+freeradius_simultaneous_use_max_age: 900
 ```
 
 ### `freeradius_eap_tls_enabled`
@@ -585,9 +599,12 @@ reapplied with the same inputs.
   disable it after initialization if convergence must work during database
   outages.
 - freeradius_simultaneous_use applies to local PAP users and requires
-  PostgreSQL; zero disables the limit. A positive limit rejects logins when the
-  recorded open-session count reaches the limit or SQL lookup fails. Accounting
-  delays and parallel logins prevent a strict concurrent-session guarantee.
+  PostgreSQL; zero disables the limit. Only open sessions updated within
+  freeradius_simultaneous_use_max_age seconds (default 900) count; stale records
+  remain stored. Configure NAS Interim-Updates more frequently, for example
+  every 300 seconds, allowing for accounting delivery and queue delays. Reaching
+  the limit or a failed SQL lookup rejects admission. Missing or delayed updates
+  and parallel logins can permit additional sessions.
 - EAP-TLS authenticates independently of freeradius_users. Exactly one
   configured policy OID must match; missing or ambiguous matches and policy
   qualifiers are rejected. TLS 1.2 and 1.3 are enabled; session resumption is
@@ -709,6 +726,8 @@ Provision PKI files first; use policy OIDs under the assigned PEN.
 ### Buffered PostgreSQL accounting
 
 Use an empty database with CREATE rights for optional schema initialization.
+Configure NAS Interim-Updates every 300 seconds for the 900-second session
+freshness window.
 
 ```yaml
 - name: Configure authentication and accounting
@@ -723,6 +742,7 @@ Use an empty database with CREATE rights for optional schema initialization.
       freeradius_postgresql_ssl_root_cert: /etc/ssl/certs/radius-db-ca.pem
       freeradius_postgresql_initialize_schema: true
       freeradius_simultaneous_use: 1
+      freeradius_simultaneous_use_max_age: 900
       freeradius_clients:
         - name: access_switch
           address: 192.0.2.20

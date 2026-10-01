@@ -356,7 +356,9 @@ server default {
             # SQL xlat escapes interpolated attributes. An empty result means failure.
             update control {
                 Simultaneous-Use := {{ freeradius_simultaneous_use }}
-                Tmp-String-1 := "%{sql:SELECT COUNT(*) FROM radacct WHERE username='%{User-Name}' AND acctstoptime IS NULL}"
+                Tmp-String-1 := "%{sql:SELECT COUNT(*) FROM radacct \
+                    WHERE username='%{User-Name}' AND acctstoptime IS NULL \
+                    AND acctupdatetime > CURRENT_TIMESTAMP - INTERVAL '{{ freeradius_simultaneous_use_max_age }} seconds'}"
             }
             if (&control:Tmp-String-1 !~ /^[0-9]+$/) {
                 update control {
