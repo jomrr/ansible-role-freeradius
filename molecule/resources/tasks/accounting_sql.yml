@@ -15,9 +15,9 @@
       community.postgresql.postgresql_query:
         query: DELETE FROM radacct WHERE acctsessionid = 'sql-lifecycle'
 
-    - name: FREERADIUS | Send session start and retransmission
+    - name: FREERADIUS | Send unsupported statuses before session start and retransmission
       ansible.builtin.include_tasks: accounting.yml
-      loop: [Start, Start, Interim-Update]
+      loop: [Failed, Tunnel-Start, Start, Start, Interim-Update]
       loop_control:
         loop_var: __freeradius_test_acct_status
       vars:

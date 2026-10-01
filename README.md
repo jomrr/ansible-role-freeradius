@@ -578,7 +578,8 @@ reapplied with the same inputs.
 - SQL mode consumes existing detail files and removes processed files. Keep
   pending files unchanged on persistent local storage, outside log rotation, and
   monitor free space. Buffering covers database outages, but does not guarantee
-  durability on storage failure.
+  durability on storage failure. Status types without a SQL query are skipped;
+  database errors remain queued.
 - Enable freeradius_postgresql_initialize_schema to initialize an empty
   database. While enabled, every role run requires database connectivity;
   disable it after initialization if convergence must work during database

@@ -431,8 +431,8 @@ server buffered-sql {
         sql {
             noop = 1
         }
-        # NAS restart events may successfully affect no sessions. Retain other noops.
-        if (noop && (&Acct-Status-Type == Accounting-On || &Acct-Status-Type == Accounting-Off)) {
+        # Consume records with no query or no changed rows; SQL failures remain retryable.
+        if (noop) {
             ok
         }
     }
