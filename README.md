@@ -575,10 +575,6 @@ reapplied with the same inputs.
 
 ## Operational Notes
 
-- When upgrading from ansible-accounting, stop FreeRADIUS and move existing
-  accounting files into accounting before applying the role. Remove the obsolete
-  ansible-users file after the role has installed user and restarted the
-  service.
 - [Molecule scenarios](molecule/README.md) check RADIUS responses on the
   supported server platforms. Actual VLAN, PPP profile, pool and filter
   enforcement requires a separate hardware check on the deployed UniFi/MikroTik
