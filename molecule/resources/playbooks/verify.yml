@@ -10,55 +10,246 @@
       ansible.builtin.import_tasks: ../tasks/service.yml
 
     - name: FREERADIUS | Verify EAP-TLS certificate authorization and VLAN mapping
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
-      loop:
-        - {profile: staff, result: accept, vlan_hex: '313030'}
-        - profile: guest
-          result: accept
-          vlan_hex: '323030'
-          phase1: tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0
-        - {profile: missing_policy, result: reject}
-        - {profile: unknown_policy, result: reject}
-        - {profile: multiple_policy, result: reject}
-        - {profile: missing_eku, result: reject}
-        - {profile: wrong_eku, result: reject}
-        - {profile: wrong_issuer, result: reject}
-        - {profile: untrusted, result: reject}
-        - {profile: revoked, result: reject}
-        - {profile: expired, result: reject}
-        - {profile: qualified, result: reject}
-      loop_control:
-        loop_var: __freeradius_eap_probe
-        label: "{{ __freeradius_eap_probe.profile }}"
-
-    - name: FREERADIUS | Verify every supported credential format
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      loop: >-
-        {{ ['molecule', 'yescrypt', 'pbkdf2', 'ssha512', 'cleartext', 'nthash'] |
-           product(['molecule-password', 'incorrect-password']) | list }}
-      loop_control:
-        loop_var: __freeradius_credential_probe
-        label: "{{ __freeradius_credential_probe.0 }} / {{ __freeradius_expected_auth_response }}"
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
       vars:
-        __freeradius_test_port: 1812
-        __freeradius_test_secret: molecule-radius-secret-2026
-        __freeradius_test_username: "{{ __freeradius_credential_probe.0 }}"
-        __freeradius_test_password: "{{ __freeradius_credential_probe.1 }}"
-        __freeradius_expected_auth_response: >-
-          {{ 'Access-Accept' if __freeradius_credential_probe.1 == 'molecule-password' else 'Access-Reject' }}
+        __freeradius_eap_cases: "{{ __freeradius_eap_baseline_cases }}"
 
-    - name: FREERADIUS | Verify VPN and MAC access profiles
-      ansible.builtin.import_tasks: ../tasks/access.yml
+    - name: FREERADIUS | Verify credential formats and NAS access profiles
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases: "{{ __freeradius_hash_cases + __freeradius_access_matrix }}"
+        __freeradius_hash_cases:
+          - {username: molecule, password: molecule-password, response: Access-Accept}
+          - {username: molecule, password: incorrect-password, response: Access-Reject}
+          - {username: yescrypt, password: molecule-password, response: Access-Accept}
+          - {username: yescrypt, password: incorrect-password, response: Access-Reject}
+          - {username: pbkdf2, password: molecule-password, response: Access-Accept}
+          - {username: pbkdf2, password: incorrect-password, response: Access-Reject}
+          - {username: ssha512, password: molecule-password, response: Access-Accept}
+          - {username: ssha512, password: incorrect-password, response: Access-Reject}
+          - {username: cleartext, password: molecule-password, response: Access-Accept}
+          - {username: cleartext, password: incorrect-password, response: Access-Reject}
+          - {username: nthash, password: molecule-password, response: Access-Accept}
+          - {username: nthash, password: incorrect-password, response: Access-Reject}
 
-    - name: FREERADIUS | Verify attempt limiting and audit events
-      ansible.builtin.import_tasks: ../tasks/security.yml
+    - name: FREERADIUS | Read admission audit events
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -o, cat]
+      changed_when: false
+      register: __freeradius_access_audit
 
-    - name: FREERADIUS | Verify SQL accounting lifecycle
-      ansible.builtin.import_tasks: ../tasks/accounting_sql.yml
+    - name: FREERADIUS | Verify VPN and MAC audit classification
+      ansible.builtin.assert:
+        that:
+          - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
+          - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
+          - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
+          - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
+          - "'molecule-password' not in __freeradius_access_audit.stdout"
+        quiet: true
 
+    - name: FREERADIUS | Exercise resets after successful authentication
+      ansible.builtin.command:
+        argv: [radclient, -x, -r, '3', -t, '3', -p, '1', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+        stdin: |
+          {% for __freeradius_password in ['molecule-password', 'wrong', 'wrong', 'molecule-password', 'wrong', 'wrong', 'molecule-password'] %}
+          User-Name = "molecule"
+          User-Password = "{{ __freeradius_password }}"
+          Service-Type = Framed-User
+          Framed-Protocol = PPP
+          Message-Authenticator = 0x00
+
+          {% endfor %}
+      changed_when: false
+      failed_when: >-
+        __freeradius_reset.stdout | regex_findall('Received Access-Accept') | length != 3 or
+        __freeradius_reset.stdout | regex_findall('Received Access-Reject') | length != 4
+      register: __freeradius_reset
+
+    - name: FREERADIUS | Record journal cursor before parallel attempts
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -n, '1', --show-cursor, -o, cat]
+      changed_when: false
+      register: __freeradius_audit_cursor
+
+    - name: FREERADIUS | Send parallel invalid authentication requests
+      ansible.builtin.command:
+        argv: [radclient, -x, -r, '3', -t, '3', -p, '8', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+        stdin: |
+          {% for __freeradius_attempt in range(8) %}
+          User-Name = "molecule"
+          User-Password = "incorrect-password"
+          Service-Type = Framed-User
+          Framed-Protocol = PPP
+          Message-Authenticator = 0x00
+
+          {% endfor %}
+      changed_when: false
+      failed_when: __freeradius_parallel.stdout | regex_findall('Received Access-Reject') | length != 8
+      register: __freeradius_parallel
+      # Use UTC for command.end and the controller's later deadline calculation.
+      environment:
+        TZ: UTC
+
+    - name: FREERADIUS | Check locked and unrelated accounts
+      ansible.builtin.command:
+        argv: [radclient, -x, -r, '3', -t, '3', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+        stdin: |
+          {% for __freeradius_name in ['molecule', 'yescrypt', 'unknown'] %}
+          User-Name = "{{ __freeradius_name }}"
+          User-Password = "molecule-password"
+          Service-Type = Framed-User
+          Framed-Protocol = PPP
+          Message-Authenticator = 0x00
+
+          {% endfor %}
+      changed_when: false
+      failed_when: >-
+        __freeradius_locked.stdout | regex_findall('Received Access-Accept') | length != 1 or
+        __freeradius_locked.stdout | regex_findall('Received Access-Reject') | length != 2
+      register: __freeradius_locked
+
+    - name: FREERADIUS | Read new authentication events
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - --no-pager
+          - -u
+          - "{{ __freeradius_service }}"
+          - -o
+          - cat
+          - "--after-cursor={{ __freeradius_audit_cursor.stdout_lines[-1] | regex_replace('^-- cursor: ', '') }}"
+      changed_when: false
+      register: __freeradius_audit
+
+    - name: FREERADIUS | Verify lockout isolation and credential-free audit events
+      ansible.builtin.assert:
+        that:
+          - __freeradius_audit.stdout | regex_findall('stage=rate_limit') | length == 6
+          - "'event=radius_auth result=Access-Accept' in __freeradius_audit.stdout"
+          - "'user_hex=6d6f6c6563756c65 client=molecule source=127.0.0.1' in __freeradius_audit.stdout"
+          - "'stage=unknown_user' in __freeradius_audit.stdout"
+          - "'molecule-password' not in __freeradius_audit.stdout"
+          - "'incorrect-password' not in __freeradius_audit.stdout"
+          - "'$6$' not in __freeradius_audit.stdout"
+          - "'$y$' not in __freeradius_audit.stdout"
+        fail_msg: "{{ __freeradius_parallel.stdout }} {{ __freeradius_locked.stdout }} {{ __freeradius_audit.stdout }}"
+        quiet: true
+
+    - name: FREERADIUS | Exercise SQL session lifecycle
+      module_defaults:
+        community.postgresql.postgresql_query:
+          login_host: "{{ freeradius_postgresql_host }}"
+          login_user: "{{ freeradius_postgresql_user }}"
+          login_password: "{{ freeradius_postgresql_password }}"
+          login_db: "{{ freeradius_postgresql_database }}"
+          ssl_mode: disable
+      block:
+        - name: FREERADIUS | Attempt runtime schema changes in rollback-only transactions
+          community.postgresql.postgresql_query:
+            query:
+              - "{{ __freeradius_ddl_probe }}"
+              - ROLLBACK
+          loop:
+            - ALTER TABLE public.radacct ADD COLUMN molecule_forbidden integer
+            - DROP TABLE public.radacct
+            - TRUNCATE public.radacct
+          loop_control:
+            loop_var: __freeradius_ddl_probe
+            break_when: __freeradius_ddl_result is failed
+          register: __freeradius_ddl_result
+          changed_when: false
+          failed_when: __freeradius_ddl_result.msg | default('') is not search('must be owner|permission denied')
+
+        - name: FREERADIUS | Reset lifecycle fixture
+          community.postgresql.postgresql_query:
+            login_user: "{{ freeradius_postgresql_schema_user }}"
+            login_password: "{{ freeradius_postgresql_schema_password }}"
+            query: DELETE FROM radacct WHERE acctsessionid = 'sql-lifecycle'
+          no_log: true
+
+        - name: FREERADIUS | Send unsupported statuses before session start and retransmission
+          ansible.builtin.import_tasks: ../tasks/accounting.yml
+          vars:
+            # 2024-03-31 00:59:30/01:00:30 UTC straddle Berlin's CET/CEST transition.
+            __freeradius_accounting_cases:
+              - {session: sql-lifecycle, status: Failed, send_nas_address: true, timestamp: 1711846770}
+              - {session: sql-lifecycle, status: Tunnel-Start, send_nas_address: true, timestamp: 1711846770}
+              - {session: sql-lifecycle, status: Start, send_nas_address: false, timestamp: 1711846770}
+              - {session: sql-lifecycle, status: Start, send_nas_address: false, timestamp: 1711846770}
+              - {session: sql-lifecycle, status: Interim-Update, send_nas_address: true, timestamp: 1711846830}
+
+        - name: FREERADIUS | Wait for one updated SQL session
+          community.postgresql.postgresql_query:
+            query: >-
+              SELECT count(*) AS sessions, max(acctinputoctets) AS received,
+                     max(acctoutputoctets) AS sent, max(acctsessiontime) AS duration,
+                     extract(epoch FROM max(acctstarttime))::bigint AS started,
+                     extract(epoch FROM max(acctupdatetime))::bigint AS updated,
+                     bool_and(acctstoptime IS NULL) AS active
+              FROM radacct WHERE acctsessionid = 'sql-lifecycle'
+          register: __freeradius_sql_session
+          until:
+            - __freeradius_sql_session.query_result[0].sessions == 1
+            - __freeradius_sql_session.query_result[0].received == 4294968530
+            - __freeradius_sql_session.query_result[0].sent == 5678
+            - __freeradius_sql_session.query_result[0].duration == 60
+            - __freeradius_sql_session.query_result[0].started == 1711846770
+            - __freeradius_sql_session.query_result[0].updated == 1711846830
+            - __freeradius_sql_session.query_result[0].active
+          retries: 30
+          delay: 2
+          changed_when: false
+
+        - name: FREERADIUS | Send session stop
+          ansible.builtin.import_tasks: ../tasks/accounting.yml
+          vars:
+            __freeradius_accounting_cases:
+              - {session: sql-lifecycle, status: Stop, timestamp: 1711846830}
+
+        - name: FREERADIUS | Wait for closed SQL session
+          community.postgresql.postgresql_query:
+            query: >-
+              SELECT count(*) AS sessions FROM radacct
+              WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime = to_timestamp(1711846830)
+          register: __freeradius_sql_stop
+          until: __freeradius_sql_stop.query_result[0].sessions == 1
+          retries: 30
+          delay: 2
+          changed_when: false
+
+        - name: FREERADIUS | Verify accounting cases for the current configuration
+          ansible.builtin.import_tasks: ../tasks/accounting.yml
+          vars:
+            __freeradius_accounting_cases:
+              - {session: nas-restart, status: Accounting-On}
+              - {session: nas-restart, status: Accounting-Off}
+              - {session: invalid-authenticator, secret: incorrect-client-secret-2026, response: No reply from server}
+
+        - name: FREERADIUS | Verify rejected packet did not reach SQL
+          community.postgresql.postgresql_query:
+            query: SELECT count(*) AS sessions FROM radacct WHERE acctsessionid = 'invalid-authenticator'
+          register: __freeradius_sql_invalid
+          changed_when: false
+
+        - name: FREERADIUS | Assert request authentication protected accounting
+          ansible.builtin.assert:
+            that:
+              - __freeradius_sql_invalid.query_result[0].sessions == 0
+            quiet: true
+
+- name: FREERADIUS | Verify platform-independent configuration constraints
+  hosts: radius_servers[0]
+  gather_facts: false
+  tasks:
     - name: FREERADIUS | Verify unsafe client definitions are rejected
       ansible.builtin.include_tasks: ../tasks/invalid_client.yml
-      run_once: true
       loop:
         - name: unrestricted_network
           clients:
@@ -94,3 +285,20 @@
       loop_control:
         loop_var: __freeradius_invalid_client
         label: "{{ __freeradius_invalid_client.name }}"
+
+- name: FREERADIUS | Verify lockout expiry after independent accounting and constraint checks
+  hosts: radius_servers
+  gather_facts: false
+  tasks:
+    - name: FREERADIUS | Wait only for the remaining attempt window
+      ansible.builtin.wait_for:
+        timeout: >-
+          {{ [0, (freeradius_failure_window + 1 -
+             (now(utc=true) - (__freeradius_parallel.end | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds())
+             | round(0, 'ceil') | int] | max }}
+
+    - name: FREERADIUS | Verify authentication after expiry
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - {password: molecule-password}

@@ -14,11 +14,14 @@
       paths:
         - "{{ role_path }}/vars"
 
-- name: FREERADIUS | Install server
+- name: FREERADIUS | Install server and required PostgreSQL packages
   become: true
   become_user: root
   ansible.builtin.package:
-    name: "{{ __freeradius_packages }}"
+    name: >-
+      {{ __freeradius_packages
+         + ([__freeradius_postgresql_package] if freeradius_accounting_backend == 'postgresql' else [])
+         + (['python3-psycopg2'] if freeradius_postgresql_initialize_schema else []) }}
     state: present
 
 - name: FREERADIUS | Create configuration validator directory
@@ -41,14 +44,6 @@
     group: "{{ __freeradius_group }}"
     mode: '0700'
   when: freeradius_accounting_enabled
-
-- name: FREERADIUS | Install PostgreSQL driver
-  become: true
-  become_user: root
-  ansible.builtin.package:
-    name: "{{ __freeradius_postgresql_package }}"
-    state: present
-  when: freeradius_accounting_backend == 'postgresql'
 
 - name: FREERADIUS | Initialize PostgreSQL schema
   ansible.builtin.include_tasks: postgresql_schema.yml

@@ -2,15 +2,87 @@
 # role: freeradius
 # file: molecule/resources/playbooks/side_effect.yml
 
-- name: FREERADIUS | Exercise database outage and session admission
+- name: FREERADIUS | Gather platform context for configuration changes
   hosts: radius_servers
   gather_facts: true
+  tasks:
+    - name: FREERADIUS | Load RADIUS platform context
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
+- name: FREERADIUS | Coordinate database outage across the fixture and RADIUS hosts
+  hosts: radius_servers:accounting_database
+  gather_facts: false
+# Keep fixture recovery after all RADIUS tasks, including failures.
+  strategy: linear
   vars:
     freeradius_postgresql_initialize_schema: false
     freeradius_simultaneous_use_max_age: 600
-    __freeradius_test_port: 1812
-    __freeradius_test_secret: molecule-radius-secret-2026
-    __freeradius_test_password: molecule-password
+  tasks:
+    - name: FREERADIUS | Buffer requests while PostgreSQL is stopped
+      block:
+        - name: FREERADIUS | Stop database fixture
+          containers.podman.podman_container:
+            name: "{{ inventory_hostname }}"
+            state: stopped
+          delegate_to: localhost
+          when: "'accounting_database' in group_names"
+
+        - name: FREERADIUS | Exercise RADIUS admission during the shared database outage
+          when: "'radius_servers' in group_names"
+          block:
+            - name: FREERADIUS | Restart RADIUS without a database connection
+              become: true
+              become_user: root
+              ansible.builtin.service:
+                name: "{{ __freeradius_service }}"
+                state: restarted
+
+            - name: FREERADIUS | Acknowledge accounting during database outage
+              ansible.builtin.import_tasks: ../tasks/accounting.yml
+              vars:
+                __freeradius_accounting_cases:
+                  - {session: outage-session}
+
+            - name: FREERADIUS | Verify PAP remains available without a session limit
+              ansible.builtin.import_tasks: ../tasks/authenticate.yml
+              vars:
+                __freeradius_auth_cases:
+                  - {password: molecule-password}
+
+            - name: FREERADIUS | Enable session admission while the database is unavailable
+              ansible.builtin.include_role:
+                name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+              vars:
+                freeradius_simultaneous_use: 1
+
+            - name: FREERADIUS | Verify admission cases for the current configuration
+              ansible.builtin.import_tasks: ../tasks/authenticate.yml
+              vars:
+                __freeradius_auth_cases:
+                  - {password: molecule-password, response: Access-Reject}
+                  - username: AABBCCDDEEFF
+                    password: aa:bb:cc:dd:ee:ff
+                    attributes:
+                      Service-Type: Call-Check
+                      NAS-Port-Type: Ethernet
+                      Calling-Station-Id: AA-BB-CC-DD-EE-FF
+                    reply: >-
+                      {{ (__freeradius_access_matrix | selectattr('name', 'equalto', 'unifi_printer') | first).reply }}
+
+      always:
+        - name: FREERADIUS | Restore database fixture
+          containers.podman.podman_container:
+            name: "{{ inventory_hostname }}"
+            state: started
+          delegate_to: localhost
+          when: "'accounting_database' in group_names"
+
+- name: FREERADIUS | Verify replay and session admission after database recovery
+  hosts: radius_servers
+  gather_facts: false
+  vars:
+    freeradius_postgresql_initialize_schema: false
+    freeradius_simultaneous_use_max_age: 600
   module_defaults:
     community.postgresql.postgresql_query:
       login_host: "{{ freeradius_postgresql_host }}"
@@ -19,63 +91,6 @@
       login_db: "{{ freeradius_postgresql_database }}"
       ssl_mode: disable
   tasks:
-    - name: FREERADIUS | Load RADIUS platform context
-      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
-
-    - name: FREERADIUS | Buffer requests while PostgreSQL is stopped
-      block:
-        - name: FREERADIUS | Stop database fixture
-          containers.podman.podman_container:
-            name: freeradius-accounting-db
-            state: stopped
-          delegate_to: localhost
-          run_once: true
-
-        - name: FREERADIUS | Restart RADIUS without a database connection
-          become: true
-          become_user: root
-          ansible.builtin.service:
-            name: "{{ __freeradius_service }}"
-            state: restarted
-
-        - name: FREERADIUS | Acknowledge accounting during database outage
-          ansible.builtin.include_tasks: ../tasks/accounting.yml
-          vars:
-            __freeradius_test_acct_session: outage-session
-
-        - name: FREERADIUS | Verify PAP remains available without a session limit
-          ansible.builtin.import_tasks: ../tasks/authenticate.yml
-
-        - name: FREERADIUS | Enable session admission while the database is unavailable
-          ansible.builtin.include_role:
-            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-          vars:
-            freeradius_simultaneous_use: 1
-
-        - name: FREERADIUS | Verify failed session lookup denies admission
-          ansible.builtin.import_tasks: ../tasks/authenticate.yml
-          vars:
-            __freeradius_expected_auth_response: Access-Reject
-
-        - name: FREERADIUS | Verify MAC admission bypasses unavailable SQL session checks
-          ansible.builtin.include_tasks: ../tasks/authenticate.yml
-          vars:
-            __freeradius_test_username: AABBCCDDEEFF
-            __freeradius_test_password: aa:bb:cc:dd:ee:ff
-            __freeradius_test_attributes:
-              Service-Type: Call-Check
-              NAS-Port-Type: Ethernet
-              Calling-Station-Id: AA-BB-CC-DD-EE-FF
-            __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "300"']
-
-      always:
-        - name: FREERADIUS | Restore database fixture
-          containers.podman.podman_container:
-            name: freeradius-accounting-db
-            state: started
-          delegate_to: localhost
-          run_once: true
-
     - name: FREERADIUS | Wait for replayed accounting after database recovery
       community.postgresql.postgresql_query:
         query: >-
@@ -90,7 +105,8 @@
     - name: FREERADIUS | Verify Simultaneous-Use rejects another login
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
-        __freeradius_expected_auth_response: Access-Reject
+        __freeradius_auth_cases:
+          - {password: molecule-password, response: Access-Reject}
 
     - name: FREERADIUS | Age the open session beyond the configured ten-minute window
       community.postgresql.postgresql_query:
@@ -102,12 +118,15 @@
 
     - name: FREERADIUS | Verify a stale session permits a new login
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - {password: molecule-password}
 
     - name: FREERADIUS | Refresh the open session with an interim update
-      ansible.builtin.include_tasks: ../tasks/accounting.yml
+      ansible.builtin.import_tasks: ../tasks/accounting.yml
       vars:
-        __freeradius_test_acct_session: outage-session
-        __freeradius_test_acct_status: Interim-Update
+        __freeradius_accounting_cases:
+          - {session: outage-session, status: Interim-Update}
 
     - name: FREERADIUS | Wait for SQL session refresh
       community.postgresql.postgresql_query:
@@ -124,13 +143,14 @@
     - name: FREERADIUS | Verify the refreshed session again denies admission
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
-        __freeradius_expected_auth_response: Access-Reject
+        __freeradius_auth_cases:
+          - {password: molecule-password, response: Access-Reject}
 
     - name: FREERADIUS | Close the recovered session
-      ansible.builtin.include_tasks: ../tasks/accounting.yml
+      ansible.builtin.import_tasks: ../tasks/accounting.yml
       vars:
-        __freeradius_test_acct_session: outage-session
-        __freeradius_test_acct_status: Stop
+        __freeradius_accounting_cases:
+          - {session: outage-session, status: Stop}
 
     - name: FREERADIUS | Wait for SQL session closure
       community.postgresql.postgresql_query:
@@ -145,11 +165,15 @@
 
     - name: FREERADIUS | Verify admission resumes after session closure
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - {password: molecule-password}
 
-- name: FREERADIUS | Exercise access profile updates and feature disablement
+- name: FREERADIUS | Exercise access profile updates and device enrollment
   hosts: radius_servers
-  gather_facts: true
+  gather_facts: false
   vars:
+    freeradius_postgresql_initialize_schema: false
     freeradius_access_profiles:
       - name: vpn_staff
         kind: vpn
@@ -167,37 +191,42 @@
       - mac: '11:22:33:44:55:66'
         access:
           - {client: molecule, profile: printers}
-    __freeradius_test_port: 1812
-    __freeradius_test_secret: molecule-radius-secret-2026
   tasks:
     - name: FREERADIUS | Update VPN profile and enroll a quarantined device
       ansible.builtin.include_role:
         name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
 
-    - name: FREERADIUS | Verify updated VPN reply attributes
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+    - name: FREERADIUS | Verify admission cases for the current configuration
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
-        __freeradius_test_password: molecule-password
-        __freeradius_expected_attributes:
-          - 'Mikrotik-Group = "vpn-updated"'
-          - 'Framed-Pool = "updated-pool"'
-          - 'Filter-Id = "updated-filter"'
-          - 'Session-Timeout = 1800'
-          - 'Idle-Timeout = 300'
-
-    - name: FREERADIUS | Verify new VLAN and release from quarantine
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      loop: [aabbccddeeff, '112233445566']
-      loop_control:
-        loop_var: __freeradius_mac
-      vars:
-        __freeradius_test_username: "{{ __freeradius_mac }}"
-        __freeradius_test_password: "{{ __freeradius_mac }}"
-        __freeradius_test_attributes:
-          Service-Type: Call-Check
-          NAS-Port-Type: Ethernet
-          Calling-Station-Id: "{{ __freeradius_mac }}"
-        __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "310"']
+        __freeradius_auth_cases:
+          - password: molecule-password
+            reply:
+              - 'Mikrotik-Group = "vpn-updated"'
+              - 'Framed-Pool = "updated-pool"'
+              - 'Filter-Id = "updated-filter"'
+              - 'Session-Timeout = 1800'
+              - 'Idle-Timeout = 300'
+          - username: aabbccddeeff
+            password: aabbccddeeff
+            attributes:
+              Service-Type: Call-Check
+              NAS-Port-Type: Ethernet
+              Calling-Station-Id: aabbccddeeff
+            reply:
+              - Tunnel-Type:0 = VLAN
+              - Tunnel-Medium-Type:0 = IEEE-802
+              - 'Tunnel-Private-Group-Id:0 = "310"'
+          - username: '112233445566'
+            password: '112233445566'
+            attributes:
+              Service-Type: Call-Check
+              NAS-Port-Type: Ethernet
+              Calling-Station-Id: '112233445566'
+            reply:
+              - Tunnel-Type:0 = VLAN
+              - Tunnel-Medium-Type:0 = IEEE-802
+              - 'Tunnel-Private-Group-Id:0 = "310"'
 
     - name: FREERADIUS | Remove all MAC grants and local users
       ansible.builtin.include_role:
@@ -207,121 +236,47 @@
         freeradius_mab_devices: []
 
     - name: FREERADIUS | Verify empty device list uses updated quarantine without PAP users
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_test_username: aabbccddeeff
-        __freeradius_test_password: aabbccddeeff
-        __freeradius_test_attributes:
-          Service-Type: Call-Check
-          NAS-Port-Type: Ethernet
-          Calling-Station-Id: aa:bb:cc:dd:ee:ff
-        __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "998"']
-
-    - name: FREERADIUS | Disable MAC admission
-      ansible.builtin.include_role:
-        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-      vars:
-        freeradius_mab_enabled: false
-
-    - name: FREERADIUS | Verify disabled MAC admission rejects known devices
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_test_username: aabbccddeeff
-        __freeradius_test_password: aabbccddeeff
-        __freeradius_test_attributes:
-          Service-Type: Call-Check
-          NAS-Port-Type: Ethernet
-          Calling-Station-Id: aa:bb:cc:dd:ee:ff
-        __freeradius_expected_auth_response: Access-Reject
-
-    - name: FREERADIUS | Disable mandatory profile authorization
-      ansible.builtin.include_role:
-        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-      vars:
-        freeradius_authorization_enabled: false
-        freeradius_mab_enabled: false
-
-    - name: FREERADIUS | Verify credential-only PAP without a profile or service discriminator
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_test_username: no_profile
-        __freeradius_test_password: molecule-password
-        __freeradius_test_attributes: {}
-
-- name: FREERADIUS | Exercise updates and service recovery
-  hosts: radius_servers
-  gather_facts: true
-  vars:
-    freeradius_authorization_enabled: false
-    freeradius_mab_enabled: false
-    freeradius_access_profiles: []
-    freeradius_mab_devices: []
-    freeradius_port: 11812
-    freeradius_accounting_port: 11813
-    freeradius_accounting_backend: detail
-    freeradius_postgresql_initialize_schema: false
-    freeradius_clients:
-      - name: replacement
-        address: 127.0.0.1
-        secret: molecule-rotated-secret-2026
-    freeradius_users:
-      - name: molecule
-        password: '$6$moleculerotated$Nn3rS7eZJh/1TvQv/GmfSn5EBpo5ZTHTpKmGsNFmXly6vw1YEwXoizeHQNBgpBfI71ASB0bj6mCJh5/Xl0Dt7.'
-  tasks:
-    - name: FREERADIUS | Rotate credentials and move the listener
-      ansible.builtin.include_role:
-        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-        public: true
-
-    - name: FREERADIUS | Verify local accounting and write failures
-      ansible.builtin.import_tasks: ../tasks/accounting_detail.yml
-
-    - name: FREERADIUS | Verify changed authentication and password revocation
-      ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_test_port: 11812
-        __freeradius_test_secret: molecule-rotated-secret-2026
-        __freeradius_test_password: "{{ __freeradius_password_probe.password }}"
-        __freeradius_expected_auth_response: "{{ __freeradius_password_probe.response }}"
-      loop:
-        - {password: molecule-rotated-password, response: Access-Accept}
-        - {password: molecule-password, response: Access-Reject}
-      loop_control:
-        loop_var: __freeradius_password_probe
-        label: "{{ __freeradius_password_probe.response }}"
-
-    - name: FREERADIUS | Stop and disable the service
-      become: true
-      become_user: root
-      ansible.builtin.service:
-        name: "{{ __freeradius_service }}"
-        enabled: false
-        state: stopped
-
-    - name: FREERADIUS | Restore service with unchanged configuration
-      ansible.builtin.include_role:
-        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-
-    - name: FREERADIUS | Verify recovered authentication
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
-        __freeradius_test_port: 11812
-        __freeradius_test_secret: molecule-rotated-secret-2026
-        __freeradius_test_password: molecule-rotated-password
+        __freeradius_auth_cases:
+          - username: aabbccddeeff
+            password: aabbccddeeff
+            attributes:
+              Service-Type: Call-Check
+              NAS-Port-Type: Ethernet
+              Calling-Station-Id: aa:bb:cc:dd:ee:ff
+            reply:
+              - Tunnel-Type:0 = VLAN
+              - Tunnel-Medium-Type:0 = IEEE-802
+              - 'Tunnel-Private-Group-Id:0 = "998"'
 
 - name: FREERADIUS | Exercise EAP-TLS policy updates and OCSP availability
   hosts: radius_servers
-  gather_facts: true
+  gather_facts: false
   vars:
+    freeradius_postgresql_initialize_schema: false
     freeradius_users: []
     freeradius_eap_tls_revocation: ocsp
     freeradius_eap_tls_ocsp_url: http://127.0.0.1:8888/
     freeradius_eap_tls_vlan_policies:
       - {oid: '1.3.6.1.4.1.32473.1', vlan_id: 400}
+    freeradius_mab_enabled: false
   tasks:
     - name: FREERADIUS | Apply certificate-only authentication with updated VLAN policy
       ansible.builtin.include_role:
         name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+
+    - name: FREERADIUS | Verify disabled MAC admission rejects known devices
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - username: aabbccddeeff
+            password: aabbccddeeff
+            attributes:
+              Service-Type: Call-Check
+              NAS-Port-Type: Ethernet
+              Calling-Station-Id: aa:bb:cc:dd:ee:ff
+            response: Access-Reject
 
     - name: FREERADIUS | Serve three signed OCSP responses from the test CA
       become: true
@@ -349,13 +304,11 @@
       register: __freeradius_ocsp_fixture
 
     - name: FREERADIUS | Verify OCSP and the changed VLAN without PAP users
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
-      loop:
-        - {profile: staff, result: accept, vlan_hex: '343030'}
-        - {profile: revoked, result: reject}
-      loop_control:
-        loop_var: __freeradius_eap_probe
-        label: "{{ __freeradius_eap_probe.profile }}"
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
+      vars:
+        __freeradius_eap_cases:
+          - {profile: staff, result: accept, vlan_hex: '343030'}
+          - {profile: revoked, result: reject}
 
     - name: FREERADIUS | Wait for OCSP fixture to finish its three requests
       become: true
@@ -368,9 +321,10 @@
       delay: 1
 
     - name: FREERADIUS | Verify OCSP outage denies a valid certificate
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
       vars:
-        __freeradius_eap_probe: {profile: staff, result: reject}
+        __freeradius_eap_cases:
+          - {profile: staff, result: reject}
 
     - name: FREERADIUS | Explicitly disable certificate revocation checking
       ansible.builtin.include_role:
@@ -379,25 +333,185 @@
         freeradius_eap_tls_revocation: none
 
     - name: FREERADIUS | Verify the explicit revocation exception
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
       vars:
-        __freeradius_eap_probe: {profile: revoked, result: accept, vlan_hex: '343030'}
+        __freeradius_eap_cases:
+          - {profile: revoked, result: accept, vlan_hex: '343030'}
 
-    - name: FREERADIUS | Disable optional EAP-TLS
+- name: FREERADIUS | Exercise updates and service recovery
+  hosts: radius_servers
+  gather_facts: false
+  vars:
+    freeradius_authorization_enabled: false
+    freeradius_mab_enabled: false
+    freeradius_access_profiles: []
+    freeradius_mab_devices: []
+    freeradius_port: 11812
+    freeradius_accounting_port: 11813
+    freeradius_accounting_backend: detail
+    freeradius_postgresql_initialize_schema: false
+    freeradius_clients:
+      - name: replacement
+        address: 127.0.0.1
+        secret: molecule-rotated-secret-2026
+    freeradius_users:
+      - name: molecule
+        password: '$6$moleculerotated$Nn3rS7eZJh/1TvQv/GmfSn5EBpo5ZTHTpKmGsNFmXly6vw1YEwXoizeHQNBgpBfI71ASB0bj6mCJh5/Xl0Dt7.'
+    freeradius_eap_tls_enabled: false
+  tasks:
+    - name: FREERADIUS | Rotate credentials and move the listener
       ansible.builtin.include_role:
         name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
-      vars:
-        freeradius_eap_tls_enabled: false
+        public: true
 
     - name: FREERADIUS | Verify disabled EAP-TLS denies certificate authentication
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
       vars:
-        __freeradius_eap_probe: {profile: staff, result: reject}
+        __freeradius_eap_cases:
+          - {profile: staff, result: reject, port: 11812, secret: molecule-rotated-secret-2026}
+
+    - name: FREERADIUS | Send local accounting lifecycle
+      ansible.builtin.import_tasks: ../tasks/accounting.yml
+      vars:
+        __freeradius_accounting_cases:
+          - {session: detail-lifecycle, status: Start, port: 11813, secret: molecule-rotated-secret-2026}
+          - {session: detail-lifecycle, status: Interim-Update, port: 11813, secret: molecule-rotated-secret-2026}
+          - {session: detail-lifecycle, status: Stop, port: 11813, secret: molecule-rotated-secret-2026}
+
+    - name: FREERADIUS | Find local detail records
+      become: true
+      become_user: root
+      ansible.builtin.find:
+        paths: "{{ __freeradius_log_dir }}/ansible-accounting"
+        patterns: detail
+      register: __freeradius_detail_files
+
+    - name: FREERADIUS | Verify private accounting records exist
+      ansible.builtin.assert:
+        that:
+          - __freeradius_detail_files.matched == 1
+          - __freeradius_detail_files.files | map(attribute='mode') | unique | list == ['0600']
+          - __freeradius_detail_files.files | map(attribute='pw_name') | unique | list == [__freeradius_user]
+        quiet: true
+
+    - name: FREERADIUS | Read stored accounting records
+      become: true
+      become_user: root
+      ansible.builtin.slurp:
+        src: "{{ __freeradius_detail_files.files[0].path }}"
+      register: __freeradius_detail_records
+
+    - name: FREERADIUS | Verify stable session identifier and stored events
+      ansible.builtin.assert:
+        that:
+          - "'detail-lifecycle' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Start' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Interim-Update' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Stop' in (__freeradius_detail_records.content | b64decode)"
+          - >-
+            (__freeradius_detail_records.content | b64decode |
+             regex_findall('Acct-Unique-Session-Id = "?([a-f0-9]{32})') | unique | length) == 1
+        quiet: true
+
+    - name: FREERADIUS | Preserve detail data before injecting an open failure
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ __freeradius_detail_files.files[0].path }}"
+          - "{{ __freeradius_detail_files.files[0].path }}.saved"
+      changed_when: true
+
+    - name: FREERADIUS | Exercise a failed detail file open
+      block:
+        - name: FREERADIUS | Replace the detail file with a directory
+          become: true
+          become_user: root
+          ansible.builtin.file:
+            path: "{{ __freeradius_detail_files.files[0].path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: FREERADIUS | Close cached detail file descriptors
+          become: true
+          become_user: root
+          ansible.builtin.service:
+            name: "{{ __freeradius_service }}"
+            state: restarted
+
+        - name: FREERADIUS | Verify failed detail writes are not acknowledged
+          ansible.builtin.import_tasks: ../tasks/accounting.yml
+          vars:
+            __freeradius_accounting_cases:
+              - {session: failed-write, port: 11813, secret: molecule-rotated-secret-2026, response: No reply from server}
+      always:
+        - name: FREERADIUS | Remove the injected directory
+          become: true
+          become_user: root
+          ansible.builtin.file:
+            path: "{{ __freeradius_detail_files.files[0].path }}"
+            state: absent
+
+        - name: FREERADIUS | Restore original detail data
+          become: true
+          become_user: root
+          ansible.builtin.command:
+            argv:
+              - mv
+              - "{{ __freeradius_detail_files.files[0].path }}.saved"
+              - "{{ __freeradius_detail_files.files[0].path }}"
+          changed_when: true
+
+    - name: FREERADIUS | Verify retry succeeds after storage recovery
+      ansible.builtin.import_tasks: ../tasks/accounting.yml
+      vars:
+        __freeradius_accounting_cases:
+          - {session: failed-write, port: 11813, secret: molecule-rotated-secret-2026}
+
+    - name: FREERADIUS | Verify credential-only PAP after rotation and reject the old password
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - password: molecule-rotated-password
+            port: 11812
+            secret: molecule-rotated-secret-2026
+            attributes: {}
+            response: Access-Accept
+            reply: []
+          - password: molecule-password
+            port: 11812
+            secret: molecule-rotated-secret-2026
+            attributes: {}
+            response: Access-Reject
+
+            reply: []
+
+    - name: FREERADIUS | Stop and disable the service
+      become: true
+      become_user: root
+      ansible.builtin.service:
+        name: "{{ __freeradius_service }}"
+        enabled: false
+        state: stopped
+
+    - name: FREERADIUS | Restore service with unchanged configuration
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+
+    - name: FREERADIUS | Verify recovered authentication
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_auth_cases:
+          - {password: molecule-rotated-password, port: 11812, secret: molecule-rotated-secret-2026, reply: []}
 
 - name: FREERADIUS | Exercise empty access lists
   hosts: radius_servers
-  gather_facts: true
+  gather_facts: false
   vars:
+    freeradius_postgresql_initialize_schema: false
     freeradius_mab_devices: []
     freeradius_clients: []
     freeradius_users: []

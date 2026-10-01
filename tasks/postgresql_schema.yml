@@ -2,13 +2,6 @@
 # role: freeradius
 # file: tasks/postgresql_schema.yml
 
-- name: FREERADIUS | Install PostgreSQL schema management adapter
-  become: true
-  become_user: root
-  ansible.builtin.package:
-    name: python3-psycopg2
-    state: present
-
 - name: FREERADIUS | Manage accounting schema with the owner identity
   module_defaults:
     group/community.postgresql.all:

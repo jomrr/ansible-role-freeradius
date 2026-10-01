@@ -17,18 +17,18 @@
       ansible.builtin.import_tasks: ../tasks/service.yml
 
     - name: FREERADIUS | Verify restored VPN and both NAS types including quarantine
-      ansible.builtin.include_tasks: ../tasks/access.yml
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
       vars:
-        __freeradius_access_cases: [vpn_profile, unifi_printer, mikrotik_printer, unknown_mac]
+        __freeradius_auth_cases: >-
+          {{ __freeradius_access_matrix |
+             selectattr('name', 'in', ['vpn_profile', 'unifi_printer', 'mikrotik_printer', 'unknown_mac']) | list }}
 
     - name: FREERADIUS | Verify restored EAP-TLS VLAN and certificate revocation
-      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
-      loop:
-        - {profile: staff, result: accept, vlan_hex: '313030'}
-        - {profile: revoked, result: reject}
-      loop_control:
-        loop_var: __freeradius_eap_probe
-        label: "{{ __freeradius_eap_probe.profile }}"
+      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
+      vars:
+        __freeradius_eap_cases:
+          - {profile: staff, result: accept, vlan_hex: '313030'}
+          - {profile: revoked, result: reject}
 
     - name: FREERADIUS | Reset the restored accounting fixture
       community.postgresql.postgresql_query:
@@ -38,13 +38,11 @@
       no_log: true
 
     - name: FREERADIUS | Send a session through the restored SQL backend
-      ansible.builtin.include_tasks: ../tasks/accounting.yml
-      loop: [Start, Stop]
-      loop_control:
-        loop_var: __freeradius_test_acct_status
+      ansible.builtin.import_tasks: ../tasks/accounting.yml
       vars:
-        __freeradius_test_acct_session: restored-session
-        __freeradius_test_acct_timestamp: 1711846830
+        __freeradius_accounting_cases:
+          - {session: restored-session, status: Start, timestamp: 1711846830}
+          - {session: restored-session, status: Stop, timestamp: 1711846830}
 
     - name: FREERADIUS | Verify the restored SQL queue records the closed session
       community.postgresql.postgresql_query:

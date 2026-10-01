@@ -56,6 +56,32 @@
         cmd: "../files/create-eap-fixtures {{ __freeradius_group }}"
         creates: /etc/freeradius-molecule-pki/ready
 
+    - name: FREERADIUS | Prepare reusable certificate test supplicants
+      become: true
+      become_user: root
+      ansible.builtin.copy:
+        dest: "/etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_fixture.profile }}.conf"
+        mode: '0600'
+        content: |
+          network={
+              key_mgmt=WPA-EAP
+              eap=TLS
+              phase1="{{ __freeradius_eap_fixture.phase1 | default('tls_disable_tlsv1_3=1') }}"
+              identity="molecule"
+              ca_cert="/etc/freeradius-molecule-pki/ca/cert.pem"
+              domain_suffix_match="radius.example.test"
+              client_cert="/etc/freeradius-molecule-pki/{{ __freeradius_eap_fixture.profile }}.pem"
+              private_key="/etc/freeradius-molecule-pki/client.key"
+          }
+      loop: "{{ __freeradius_eap_baseline_cases }}"
+      loop_control:
+        loop_var: __freeradius_eap_fixture
+        label: "{{ __freeradius_eap_fixture.profile }}"
+
+- name: FREERADIUS | Prepare shared PostgreSQL logins through one RADIUS host
+  hosts: radius_servers[0]
+  gather_facts: false
+  tasks:
     - name: FREERADIUS | Wait for database fixture
       ansible.builtin.wait_for:
         host: "{{ freeradius_postgresql_host }}"
@@ -80,9 +106,12 @@
       loop_control:
         loop_var: __freeradius_database_login
         label: "{{ __freeradius_database_login.name }}"
-      run_once: true
       no_log: true
 
+- name: FREERADIUS | Prepare isolated databases for all RADIUS platforms
+  hosts: radius_servers
+  gather_facts: false
+  tasks:
     - name: FREERADIUS | Create isolated owner-controlled database for each platform
       community.postgresql.postgresql_db:
         login_host: "{{ freeradius_postgresql_host }}"
