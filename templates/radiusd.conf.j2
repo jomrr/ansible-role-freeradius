@@ -44,8 +44,98 @@ client {{ __freeradius_client.name }} {
 }
 
 {% endfor %}
-{% if freeradius_accounting_enabled %}
+{% if freeradius_accounting_enabled or freeradius_authorization_enabled %}
 policy {
+{% if freeradius_authorization_enabled %}
+    access_profile {
+        if (!&control:Tmp-String-2) {
+            reject
+        }
+{% for __freeradius_profile in freeradius_access_profiles %}
+        if (&control:Tmp-String-2 == "{{ __freeradius_profile.name }}") {
+            update reply {
+{% if __freeradius_profile.kind == 'mab' %}
+                Tunnel-Type := VLAN
+                Tunnel-Medium-Type := IEEE-802
+                Tunnel-Private-Group-Id := "{{ __freeradius_profile.vlan_id }}"
+{% endif %}
+{% if __freeradius_profile.mikrotik_group is defined %}
+                Mikrotik-Group := "{{ __freeradius_profile.mikrotik_group }}"
+{% endif %}
+{% if __freeradius_profile.framed_pool is defined %}
+                Framed-Pool := "{{ __freeradius_profile.framed_pool }}"
+{% endif %}
+{% if __freeradius_profile.filter_id is defined %}
+                Filter-Id := "{{ __freeradius_profile.filter_id }}"
+{% endif %}
+{% if __freeradius_profile.session_timeout is defined %}
+                Session-Timeout := {{ __freeradius_profile.session_timeout }}
+{% endif %}
+{% if __freeradius_profile.idle_timeout is defined %}
+                Idle-Timeout := {{ __freeradius_profile.idle_timeout }}
+{% endif %}
+            }
+        }
+{% endfor %}
+    }
+{% endif %}
+{% if freeradius_mab_enabled %}
+    normalize_mab_mac {
+        if (&control:Tmp-String-3 !~ /^([0-9a-f]{12}|([0-9a-f]{2}:){5}[0-9a-f]{2}|([0-9a-f]{2}-){5}[0-9a-f]{2}|([0-9a-f]{4}\.){2}[0-9a-f]{4})$/i) {
+            reject
+        }
+        if (&control:Tmp-String-3 =~ /^([0-9a-f]{2})[:-]?([0-9a-f]{2})[-:.]?([0-9a-f]{2})[:-]?([0-9a-f]{2})[-:.]?([0-9a-f]{2})[:-]?([0-9a-f]{2})$/i) {
+            update control {
+                Tmp-String-3 := "%{tolower:%{1}%{2}%{3}%{4}%{5}%{6}}"
+            }
+        }
+    }
+    mab_authorize {
+        update control {
+            Tmp-String-0 := "mab_invalid"
+        }
+        if (!&User-Name || !&User-Password || !&Calling-Station-Id) {
+            reject
+        }
+        update control {
+            Tmp-String-3 := &User-Name
+        }
+        normalize_mab_mac
+        update control {
+            Tmp-String-4 := &control:Tmp-String-3
+            Tmp-String-3 := &User-Password
+        }
+        normalize_mab_mac
+        if (&control:Tmp-String-3 != &control:Tmp-String-4) {
+            reject
+        }
+        update control {
+            Tmp-String-3 := &Calling-Station-Id
+        }
+        normalize_mab_mac
+        if (&control:Tmp-String-3 != &control:Tmp-String-4) {
+            reject
+        }
+        update control {
+            Tmp-String-0 := "mab_quarantine"
+            Tmp-String-2 := "{{ freeradius_mab_quarantine_profile }}"
+        }
+{% for __freeradius_device in freeradius_mab_devices %}
+{% for __freeradius_grant in __freeradius_device.access | default([]) %}
+        if (&control:Tmp-String-4 == "{{ __freeradius_device.mac | regex_replace('[-:.]', '') | lower }}" && "%{client:shortname}" == "{{ __freeradius_grant.client }}") {
+            update control {
+                Tmp-String-0 := "mab"
+                Tmp-String-2 := "{{ __freeradius_grant.profile }}"
+            }
+        }
+{% endfor %}
+{% endfor %}
+        update control {
+            Auth-Type := Accept
+        }
+    }
+{% endif %}
+{% if freeradius_accounting_enabled %}
     # Defined here because distribution policy.d files are not loaded.
     acct_unique {
         # NAS-Identifier alone is valid; PostgreSQL also needs a NAS address.
@@ -59,6 +149,7 @@ policy {
 {% endraw %}
         }
     }
+{% endif %}
 }
 
 {% endif %}
@@ -172,7 +263,7 @@ modules {
         filename = syslog
         syslog_facility = authpriv
         syslog_severity = info
-        format = "event=radius_auth result=%{reply:Packet-Type} user_hex=%{hex:&User-Name} client=%{client:shortname} source=%{Packet-Src-IP-Address} stage=%{control:Tmp-String-0}"
+        format = "event=radius_auth result=%{reply:Packet-Type} user_hex=%{hex:&User-Name} client=%{client:shortname} source=%{Packet-Src-IP-Address} stage=%{control:Tmp-String-0} profile=%{control:Tmp-String-2} mac=%{control:Tmp-String-4}"
     }
 }
 
@@ -200,14 +291,26 @@ server default {
         update control {
             Tmp-String-0 := "unknown_user"
         }
-{% if freeradius_eap_tls_enabled %}
         if (&request:EAP-Message) {
+{% if freeradius_eap_tls_enabled %}
             update control {
                 Tmp-String-0 := "eap_tls"
             }
             eap
             return
+{% else %}
+            reject
+{% endif %}
         }
+{% if freeradius_mab_enabled %}
+{% for __freeradius_client in freeradius_clients %}
+{% if 'mab' in __freeradius_client.services | default([]) %}
+        if ("%{client:shortname}" == "{{ __freeradius_client.name }}" && &Service-Type == {{ __freeradius_client.mab_service_type }} && (&NAS-Port-Type == Ethernet || &NAS-Port-Type == Wireless-802.11)) {
+            mab_authorize
+            return
+        }
+{% endif %}
+{% endfor %}
 {% endif %}
         files
         # Only configured users allocate cache entries; no credentials are cached.
@@ -247,7 +350,7 @@ server default {
         }
     }
     post-auth {
-        if (!&request:EAP-Message) {
+        if (!&request:EAP-Message && &control:Auth-Type == PAP) {
 {% if freeradius_simultaneous_use > 0 %}
             # SQL xlat escapes interpolated attributes. An empty result means failure.
             update control {
@@ -270,6 +373,28 @@ server default {
                 reject
             }
 {% endif %}
+{% if freeradius_authorization_enabled %}
+            update control {
+                Tmp-String-0 := "vpn_denied"
+            }
+            # PPP framing distinguishes VPN admission from other NAS services.
+            if (!&Service-Type || &Service-Type != Framed-User || !&Framed-Protocol || &Framed-Protocol != PPP) {
+                reject
+            }
+{% for __freeradius_account in freeradius_users %}
+{% for __freeradius_grant in __freeradius_account.access | default([]) %}
+            if (&User-Name == "{{ __freeradius_account.name }}" && "%{client:shortname}" == "{{ __freeradius_grant.client }}") {
+                update control {
+                    Tmp-String-0 := "vpn"
+                    Tmp-String-2 := "{{ __freeradius_grant.profile }}"
+                }
+            }
+{% endfor %}
+{% endfor %}
+            if (!&control:Tmp-String-2) {
+                reject
+            }
+{% endif %}
             # Read-only prevents concurrent successful requests recreating a deleted entry.
             update control {
                 Cache-TTL := 0
@@ -277,6 +402,11 @@ server default {
             }
             login_attempts
         }
+{% if freeradius_authorization_enabled %}
+        if (!&request:EAP-Message) {
+            access_profile
+        }
+{% endif %}
         auth_audit
         Post-Auth-Type REJECT {
 {% if freeradius_eap_tls_enabled %}

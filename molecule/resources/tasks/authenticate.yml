@@ -18,6 +18,11 @@
       User-Name = "{{ __freeradius_test_username | default('molecule') }}"
       User-Password = "{{ __freeradius_test_password }}"
       Message-Authenticator = 0x00
+      Packet-Src-IP-Address = {{ __freeradius_test_source | default('127.0.0.1') }}
+      {% for __freeradius_attribute in __freeradius_test_attributes |
+        default({'Service-Type': 'Framed-User', 'Framed-Protocol': 'PPP'}) | dict2items %}
+      {{ __freeradius_attribute.key }} = {{ __freeradius_attribute.value | to_json }}
+      {% endfor %}
   changed_when: false
   failed_when: false
   register: __freeradius_accept
@@ -28,6 +33,24 @@
       - (__freeradius_expected_auth_response | default('Access-Accept')) in __freeradius_accept.stdout
     fail_msg: "{{ __freeradius_accept.stdout }} {{ __freeradius_accept.stderr }}"
     quiet: true
+
+- name: FREERADIUS | Verify assigned reply attributes
+  ansible.builtin.assert:
+    that:
+      - __freeradius_expected_attribute in __freeradius_accept.stdout
+    quiet: true
+  loop: "{{ __freeradius_expected_attributes | default([]) }}"
+  loop_control:
+    loop_var: __freeradius_expected_attribute
+
+- name: FREERADIUS | Verify denied admission has no access profile
+  ansible.builtin.assert:
+    that:
+      - >-
+        __freeradius_accept.stdout is not search(
+        '(Mikrotik-Group|Framed-Pool|Filter-Id|Tunnel-Type|Tunnel-Medium-Type|Tunnel-Private-Group-Id|Session-Timeout|Idle-Timeout)(:0)? =')
+    quiet: true
+  when: __freeradius_expected_auth_response | default('Access-Accept') == 'Access-Reject'
 
 - name: FREERADIUS | Send invalid authentication request
   ansible.builtin.command:
@@ -45,6 +68,11 @@
       User-Name = "{{ __freeradius_test_username | default('molecule') }}"
       User-Password = "{{ __freeradius_rejected_password }}"
       Message-Authenticator = 0x00
+      Packet-Src-IP-Address = {{ __freeradius_test_source | default('127.0.0.1') }}
+      {% for __freeradius_attribute in __freeradius_test_attributes |
+        default({'Service-Type': 'Framed-User', 'Framed-Protocol': 'PPP'}) | dict2items %}
+      {{ __freeradius_attribute.key }} = {{ __freeradius_attribute.value | to_json }}
+      {% endfor %}
   changed_when: false
   failed_when: false
   register: __freeradius_reject
@@ -53,5 +81,8 @@
   ansible.builtin.assert:
     that:
       - "'Access-Reject' in __freeradius_reject.stdout"
+      - >-
+        __freeradius_reject.stdout is not search(
+        '(Mikrotik-Group|Framed-Pool|Filter-Id|Tunnel-Type|Tunnel-Medium-Type|Tunnel-Private-Group-Id|Session-Timeout|Idle-Timeout)(:0)? =')
     fail_msg: "{{ __freeradius_reject.stdout }} {{ __freeradius_reject.stderr }}"
     quiet: true

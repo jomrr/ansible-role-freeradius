@@ -52,27 +52,93 @@ provisioner:
             vlan_id: 200
         freeradius_failure_limit: 3
         freeradius_failure_window: 30
+        freeradius_authorization_enabled: true
+        freeradius_mab_enabled: true
+        freeradius_mab_quarantine_profile: "quarantine"
+        freeradius_access_profiles:
+          - name: "vpn_staff"
+            kind: "vpn"
+            mikrotik_group: "vpn-staff"
+            framed_pool: "vpn-pool"
+            filter_id: "vpn-filter"
+            session_timeout: 3600
+            idle_timeout: 600
+          - name: "printers"
+            kind: "mab"
+            vlan_id: 300
+            session_timeout: 600
+            idle_timeout: 120
+          - name: "quarantine"
+            kind: "mab"
+            vlan_id: 999
+            session_timeout: 120
+        freeradius_mab_devices:
+          - mac: "aa:bb:cc:dd:ee:ff"
+            access:
+              - client: "molecule"
+                profile: "printers"
+              - client: "mikrotik_mab"
+                profile: "printers"
+          - mac: "12:34:56:78:90:ab"
+            access:
+              - client: "mikrotik_mab"
+                profile: "printers"
         freeradius_clients:
           - name: "molecule"
             address: "127.0.0.1"
             secret: "molecule-radius-secret-2026"
+            services:
+              - "vpn"
+              - "mab"
+            mab_service_type: "Call-Check"
+          - name: "mikrotik_mab"
+            address: "127.0.0.2"
+            secret: "molecule-mikrotik-secret-2026"
+            services:
+              - "mab"
+            mab_service_type: "Framed-User"
+          - name: "unassigned"
+            address: "127.0.0.3"
+            secret: "molecule-unassigned-secret-2026"
+            services:
+              - "vpn"
         freeradius_users:
           - name: "molecule"
             password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
           - name: "yescrypt"
             password: "$$y$$j9T$$4t5m3NETzIbg3nUDVlDFk0$$.vWIX7aKYcYjuS2ZRRp3LYuGpPxdXCfSqMHftxJFEK9"
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
           - name: "pbkdf2"
             password_attribute: "PBKDF2-Password"
             password: "$$PBKDF2$$HMACSHA2+256:10000:bW9sZWN1bGUtcmFkaXVzLXRlc3Q=$$EVuwQXzj4cnInQKgJV0ebDNOsB9bH8cPn93w1zV4Mc8="
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
           - name: "ssha512"
             password_attribute: "SSHA2-512-Password"
             password: "UvtgGlsFQrNfyW1K6piCcunSJk9xmlSnC7/mtLymenxSdcVlhG2vcSUbcAZF/4THoFcaqdq7QumhEZc3Aj3NBG1vbGVjdWxlLXJhZGl1cy10ZXN0"
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
           - name: "cleartext"
             password_attribute: "Cleartext-Password"
             password: "molecule-password"
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
           - name: "nthash"
             password_attribute: "NT-Password"
             password: "296c92fcc9aaaa38289733d6d46c931a"
+            access:
+              - client: "molecule"
+                profile: "vpn_staff"
+          - name: "no_profile"
+            password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
 verifier:
   name: "ansible"
 scenario:

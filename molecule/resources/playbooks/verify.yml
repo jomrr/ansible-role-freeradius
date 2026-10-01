@@ -77,6 +77,9 @@
         __freeradius_test_password: molecule-password
         __freeradius_rejected_password: incorrect-password
 
+    - name: FREERADIUS | Verify VPN and MAC access profiles
+      ansible.builtin.import_tasks: ../tasks/access.yml
+
     - name: FREERADIUS | Verify attempt limiting and audit events
       ansible.builtin.import_tasks: ../tasks/security.yml
 
@@ -95,6 +98,28 @@
             - {name: first, address: 192.0.2.1, secret: molecule-radius-secret-2026}
             - {name: second, address: 192.0.2.2, secret: molecule-radius-secret-2026}
           failed_task: FREERADIUS | Require a distinct shared secret for each client
+        - name: invalid_profile_vlan
+          profiles:
+            - {name: invalid, kind: mab, vlan_id: 4095}
+          failed_task: FREERADIUS | Validate access profile constraints
+        - name: unknown_profile_reference
+          devices:
+            - mac: aa:bb:cc:dd:ee:ff
+              access:
+                - {client: molecule, profile: nonexistent}
+          failed_task: FREERADIUS | Validate MAB grant references
+        - name: repeated_client_grant
+          devices:
+            - mac: aa:bb:cc:dd:ee:ff
+              access:
+                - {client: molecule, profile: printers}
+                - {client: molecule, profile: quarantine}
+          failed_task: FREERADIUS | Require unique client grants per identity
+        - name: repeated_normalized_mac
+          devices:
+            - {mac: 'aa:bb:cc:dd:ee:ff'}
+            - {mac: AABBCCDDEEFF}
+          failed_task: FREERADIUS | Validate authorization prerequisites
       loop_control:
         loop_var: __freeradius_invalid_client
         label: "{{ __freeradius_invalid_client.name }}"

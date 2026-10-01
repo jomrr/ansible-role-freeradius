@@ -4,8 +4,8 @@
 
 argument_specs:
   main:
-    short_description: Configure FreeRADIUS clients, PAP users, EAP-TLS certificate policies
-      and accounting.
+    short_description: Configure FreeRADIUS PAP VPN and MAC access profiles, EAP-TLS certificate
+      policies and accounting.
     options:
       freeradius_listen_address:
         type: str
@@ -39,6 +39,22 @@ argument_specs:
             no_log: true
             description: Unique shared secret of 16 to 128 characters; letters, digits and
               ._~!@#%^&*+=:/?- are accepted.
+          services:
+            type: list
+            elements: str
+            choices:
+              - vpn
+              - mab
+            default: []
+            description: Explicit services allowed when profile authorization is enabled;
+              empty denies both services.
+          mab_service_type:
+            type: str
+            choices:
+              - Call-Check
+              - Framed-User
+            description: Required for a MAB client; Service-Type sent by this NAS for MAC
+              authentication.
       freeradius_password_attribute:
         type: str
         default: Crypt-Password
@@ -54,8 +70,8 @@ argument_specs:
         type: list
         elements: dict
         default: []
-        description: Authoritative local PAP users; an empty list disables PAP without affecting
-          EAP-TLS.
+        description: Authoritative local PAP users; an empty list disables user authentication
+          without affecting EAP-TLS or MAB.
         options:
           name:
             type: str
@@ -77,6 +93,99 @@ argument_specs:
               - NT-Password
               - Cleartext-Password
             description: Optional per-user override of freeradius_password_attribute.
+          access:
+            type: list
+            elements: dict
+            default: []
+            description: VPN profile grants; exactly one entry per client, missing grants
+              deny access when authorization is enabled.
+            options:
+              client:
+                type: str
+                required: true
+                description: Name of a configured client with the vpn service.
+              profile:
+                type: str
+                required: true
+                description: Name of a configured vpn profile.
+      freeradius_authorization_enabled:
+        type: bool
+        default: false
+        description: Require a VPN profile grant after PAP authentication; false preserves
+          credential-only PAP.
+      freeradius_access_profiles:
+        type: list
+        elements: dict
+        default: []
+        description: Named VPN and MAB reply profiles; values refer to resources already
+          provisioned on the NAS.
+        options:
+          name:
+            type: str
+            required: true
+            description: Unique profile identifier containing letters, digits, underscores
+              or hyphens.
+          kind:
+            type: str
+            required: true
+            choices:
+              - vpn
+              - mab
+            description: VPN profiles apply to local users; MAB profiles apply to MAC admission
+              and quarantine.
+          mikrotik_group:
+            type: str
+            description: VPN only; existing MikroTik PPP profile returned as Mikrotik-Group.
+          framed_pool:
+            type: str
+            description: VPN only; existing NAS IP pool returned as Framed-Pool.
+          filter_id:
+            type: str
+            description: VPN only; existing NAS filter returned as Filter-Id.
+          vlan_id:
+            type: int
+            description: Required for MAB; VLAN ID from 1 to 4094, returned in the standard
+              tunnel attributes.
+          session_timeout:
+            type: int
+            description: Optional Session-Timeout in seconds, from 1 to 4294967295.
+          idle_timeout:
+            type: int
+            description: Optional Idle-Timeout in seconds, from 1 to 4294967295.
+      freeradius_mab_enabled:
+        type: bool
+        default: false
+        description: Enable MAC admission on clients with the mab service; requires profile
+          authorization enabled.
+      freeradius_mab_devices:
+        type: list
+        elements: dict
+        default: []
+        description: MAC devices and client-specific grants; absent grants select quarantine
+          after valid MAC credentials.
+        options:
+          mac:
+            type: str
+            required: true
+            description: Unique MAC in plain, colon, hyphen or dotted notation, case insensitive.
+          access:
+            type: list
+            elements: dict
+            default: []
+            description: MAB profile grants; at most one entry per client.
+            options:
+              client:
+                type: str
+                required: true
+                description: Name of a configured client with the mab service.
+              profile:
+                type: str
+                required: true
+                description: Name of a configured mab profile.
+      freeradius_mab_quarantine_profile:
+        type: str
+        description: Required when MAB is enabled; name of a mab profile with the quarantine
+          VLAN.
       freeradius_failure_limit:
         type: int
         default: 5

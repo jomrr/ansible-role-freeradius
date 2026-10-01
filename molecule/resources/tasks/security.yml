@@ -9,6 +9,8 @@
       {% for __freeradius_password in ['molecule-password', 'wrong', 'wrong', 'molecule-password', 'wrong', 'wrong', 'molecule-password'] %}
       User-Name = "molecule"
       User-Password = "{{ __freeradius_password }}"
+      Service-Type = Framed-User
+      Framed-Protocol = PPP
       Message-Authenticator = 0x00
 
       {% endfor %}
@@ -39,6 +41,8 @@
       {% for __freeradius_attempt in range(8) %}
       User-Name = "molecule"
       User-Password = "incorrect-password"
+      Service-Type = Framed-User
+      Framed-Protocol = PPP
       Message-Authenticator = 0x00
 
       {% endfor %}
@@ -53,6 +57,8 @@
       {% for __freeradius_name in ['molecule', 'yescrypt', 'unknown'] %}
       User-Name = "{{ __freeradius_name }}"
       User-Password = "molecule-password"
+      Service-Type = Framed-User
+      Framed-Protocol = PPP
       Message-Authenticator = 0x00
 
       {% endfor %}

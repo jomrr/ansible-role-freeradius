@@ -156,3 +156,99 @@
     loop_var: __freeradius_account
     label: "{{ __freeradius_account.name }}"
   no_log: true
+
+- name: FREERADIUS | Validate authorization prerequisites
+  ansible.builtin.assert:
+    that:
+      - not freeradius_mab_enabled or freeradius_authorization_enabled
+      - freeradius_access_profiles | map(attribute='name') | unique | length == freeradius_access_profiles | length
+      - >-
+        freeradius_mab_devices | map(attribute='mac') | map('regex_replace', '[-:.]', '') | map('lower') | unique | length
+        == freeradius_mab_devices | length
+    quiet: true
+
+- name: FREERADIUS | Validate access profile constraints
+  ansible.builtin.assert:
+    that:
+      - __freeradius_profile.name is match('^[A-Za-z0-9_-]+\Z')
+      - __freeradius_profile.kind != 'mab' or __freeradius_profile.vlan_id is defined
+      - __freeradius_profile.kind != 'vpn' or __freeradius_profile.vlan_id is not defined
+      - >-
+        __freeradius_profile.kind != 'mab' or
+        (__freeradius_profile.mikrotik_group is not defined and __freeradius_profile.framed_pool is not defined
+        and __freeradius_profile.filter_id is not defined)
+      - __freeradius_profile.vlan_id is not defined or (1 <= __freeradius_profile.vlan_id <= 4094)
+      - __freeradius_profile.session_timeout is not defined or (1 <= __freeradius_profile.session_timeout <= 4294967295)
+      - __freeradius_profile.idle_timeout is not defined or (1 <= __freeradius_profile.idle_timeout <= 4294967295)
+      - __freeradius_profile.mikrotik_group is not defined or __freeradius_profile.mikrotik_group is match('^[A-Za-z0-9_. /:@+-]+\Z')
+      - __freeradius_profile.framed_pool is not defined or __freeradius_profile.framed_pool is match('^[A-Za-z0-9_. /:@+-]+\Z')
+      - __freeradius_profile.filter_id is not defined or __freeradius_profile.filter_id is match('^[A-Za-z0-9_. /:@+-]+\Z')
+    quiet: true
+  loop: "{{ freeradius_access_profiles }}"
+  loop_control:
+    loop_var: __freeradius_profile
+    label: "{{ __freeradius_profile.name }}"
+
+- name: FREERADIUS | Require a service discriminator for MAB clients
+  ansible.builtin.assert:
+    that:
+      - "'mab' not in __freeradius_services"
+    quiet: true
+  loop: "{{ freeradius_clients | rejectattr('mab_service_type', 'defined') | map(attribute='services', default=[]) }}"
+  loop_control:
+    loop_var: __freeradius_services
+
+- name: FREERADIUS | Require the MAB quarantine profile
+  ansible.builtin.assert:
+    that:
+      - freeradius_mab_quarantine_profile is defined
+      - freeradius_mab_quarantine_profile in freeradius_access_profiles | selectattr('kind', 'equalto', 'mab') | map(attribute='name')
+    quiet: true
+  when: freeradius_mab_enabled
+
+- name: FREERADIUS | Validate MAC device syntax
+  ansible.builtin.assert:
+    that:
+      - >-
+        __freeradius_mac is match('(?i)^([0-9a-f]{12}|([0-9a-f]{2}:){5}[0-9a-f]{2}|([0-9a-f]{2}-){5}[0-9a-f]{2}|([0-9a-f]{4}\.){2}[0-9a-f]{4})\Z')
+    quiet: true
+  loop: "{{ freeradius_mab_devices | map(attribute='mac') }}"
+  loop_control:
+    loop_var: __freeradius_mac
+
+- name: FREERADIUS | Require unique client grants per identity
+  ansible.builtin.assert:
+    that:
+      - __freeradius_access | map(attribute='client') | unique | length == __freeradius_access | length
+    quiet: true
+  loop: >-
+    {{ (freeradius_users | map(attribute='access', default=[]) | list)
+       + (freeradius_mab_devices | map(attribute='access', default=[]) | list) }}
+  loop_control:
+    loop_var: __freeradius_access
+
+- name: FREERADIUS | Validate VPN grant references
+  ansible.builtin.assert:
+    that:
+      - __freeradius_grant.profile in freeradius_access_profiles | selectattr('kind', 'equalto', 'vpn') | map(attribute='name')
+      - >-
+        __freeradius_grant.client in freeradius_clients | selectattr('services', 'defined')
+        | selectattr('services', 'contains', 'vpn') | map(attribute='name')
+    quiet: true
+  loop: "{{ freeradius_users | map(attribute='access', default=[]) | flatten }}"
+  loop_control:
+    loop_var: __freeradius_grant
+    label: "{{ __freeradius_grant.client }}:{{ __freeradius_grant.profile }}"
+
+- name: FREERADIUS | Validate MAB grant references
+  ansible.builtin.assert:
+    that:
+      - __freeradius_grant.profile in freeradius_access_profiles | selectattr('kind', 'equalto', 'mab') | map(attribute='name')
+      - >-
+        __freeradius_grant.client in freeradius_clients | selectattr('services', 'defined')
+        | selectattr('services', 'contains', 'mab') | map(attribute='name')
+    quiet: true
+  loop: "{{ freeradius_mab_devices | map(attribute='access', default=[]) | flatten }}"
+  loop_control:
+    loop_var: __freeradius_grant
+    label: "{{ __freeradius_grant.client }}:{{ __freeradius_grant.profile }}"

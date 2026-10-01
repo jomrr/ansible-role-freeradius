@@ -57,6 +57,17 @@
           vars:
             __freeradius_expected_auth_response: Access-Reject
 
+        - name: FREERADIUS | Verify MAC admission bypasses unavailable SQL session checks
+          ansible.builtin.include_tasks: ../tasks/authenticate.yml
+          vars:
+            __freeradius_test_username: AABBCCDDEEFF
+            __freeradius_test_password: aa:bb:cc:dd:ee:ff
+            __freeradius_test_attributes:
+              Service-Type: Call-Check
+              NAS-Port-Type: Ethernet
+              Calling-Station-Id: AA-BB-CC-DD-EE-FF
+            __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "300"']
+
         - name: FREERADIUS | Verify queued data survives another daemon restart
           become: true
           become_user: root
@@ -115,10 +126,117 @@
     - name: FREERADIUS | Verify admission resumes after session closure
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
 
+- name: FREERADIUS | Exercise access profile updates and feature disablement
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_access_profiles:
+      - name: vpn_staff
+        kind: vpn
+        mikrotik_group: vpn-updated
+        framed_pool: updated-pool
+        filter_id: updated-filter
+        session_timeout: 1800
+        idle_timeout: 300
+      - {name: printers, kind: mab, vlan_id: 310}
+      - {name: quarantine, kind: mab, vlan_id: 998}
+    freeradius_mab_devices:
+      - mac: aa:bb:cc:dd:ee:ff
+        access:
+          - {client: molecule, profile: printers}
+      - mac: '11:22:33:44:55:66'
+        access:
+          - {client: molecule, profile: printers}
+    __freeradius_test_port: 1812
+    __freeradius_test_secret: molecule-radius-secret-2026
+    __freeradius_rejected_password: incorrect-password
+  tasks:
+    - name: FREERADIUS | Update VPN profile and enroll a quarantined device
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+
+    - name: FREERADIUS | Verify updated VPN reply attributes
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_password: molecule-password
+        __freeradius_expected_attributes:
+          - 'Mikrotik-Group = "vpn-updated"'
+          - 'Framed-Pool = "updated-pool"'
+          - 'Filter-Id = "updated-filter"'
+          - 'Session-Timeout = 1800'
+          - 'Idle-Timeout = 300'
+
+    - name: FREERADIUS | Verify new VLAN and release from quarantine
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      loop: [aabbccddeeff, '112233445566']
+      loop_control:
+        loop_var: __freeradius_mac
+      vars:
+        __freeradius_test_username: "{{ __freeradius_mac }}"
+        __freeradius_test_password: "{{ __freeradius_mac }}"
+        __freeradius_test_attributes:
+          Service-Type: Call-Check
+          NAS-Port-Type: Ethernet
+          Calling-Station-Id: "{{ __freeradius_mac }}"
+        __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "310"']
+
+    - name: FREERADIUS | Remove all MAC grants and local users
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_users: []
+        freeradius_mab_devices: []
+
+    - name: FREERADIUS | Verify empty device list uses updated quarantine without PAP users
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_username: aabbccddeeff
+        __freeradius_test_password: aabbccddeeff
+        __freeradius_test_attributes:
+          Service-Type: Call-Check
+          NAS-Port-Type: Ethernet
+          Calling-Station-Id: aa:bb:cc:dd:ee:ff
+        __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "998"']
+
+    - name: FREERADIUS | Disable MAC admission
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_mab_enabled: false
+
+    - name: FREERADIUS | Verify disabled MAC admission rejects known devices
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_username: aabbccddeeff
+        __freeradius_test_password: aabbccddeeff
+        __freeradius_test_attributes:
+          Service-Type: Call-Check
+          NAS-Port-Type: Ethernet
+          Calling-Station-Id: aa:bb:cc:dd:ee:ff
+        __freeradius_expected_auth_response: Access-Reject
+
+    - name: FREERADIUS | Disable mandatory profile authorization
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_authorization_enabled: false
+        freeradius_mab_enabled: false
+
+    - name: FREERADIUS | Verify credential-only PAP without a profile or service discriminator
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_test_username: no_profile
+        __freeradius_test_password: molecule-password
+        __freeradius_test_attributes: {}
+
 - name: FREERADIUS | Exercise updates and service recovery
   hosts: radius_servers
   gather_facts: true
   vars:
+    freeradius_authorization_enabled: false
+    freeradius_mab_enabled: false
+    freeradius_access_profiles: []
+    freeradius_mab_devices: []
     freeradius_port: 11812
     freeradius_accounting_port: 11813
     freeradius_accounting_backend: detail
@@ -256,6 +374,7 @@
   hosts: radius_servers
   gather_facts: true
   vars:
+    freeradius_mab_devices: []
     freeradius_clients: []
     freeradius_users: []
   roles:
@@ -276,6 +395,8 @@
         stdin: |
           User-Name = "molecule"
           User-Password = "molecule-password"
+          Service-Type = Framed-User
+          Framed-Protocol = PPP
           Message-Authenticator = 0x00
       changed_when: false
       failed_when: false

@@ -6,13 +6,14 @@
 [![dev](https://img.shields.io/github/actions/workflow/status/jomrr/ansible-role-freeradius/dev.yml?branch=dev&label=dev)](https://github.com/jomrr/ansible-role-freeradius/actions/workflows/dev.yml?query=branch%3Adev)
 [![main](https://img.shields.io/github/actions/workflow/status/jomrr/ansible-role-freeradius/main.yml?branch=main&label=main)](https://github.com/jomrr/ansible-role-freeradius/actions/workflows/main.yml?query=branch%3Amain)
 
-Configure FreeRADIUS with PAP, optional EAP-TLS VLAN policies and buffered
-PostgreSQL accounting.
+Configure FreeRADIUS with PAP VPN profiles, MAC admission, EAP-TLS VLAN policies
+and buffered accounting.
 
 ## Purpose
 
-Run FreeRADIUS for local PAP, optional EAP-TLS with certificate-based VLAN
-assignment, and optional accounting over IPv4 UDP.
+Run FreeRADIUS for local PAP with optional VPN profiles, MAC admission with
+VLANs and quarantine, EAP-TLS certificate policies, and accounting over IPv4
+UDP.
 
 ## Scope
 
@@ -23,6 +24,10 @@ assignment, and optional accounting over IPv4 UDP.
 - Local PAP authentication with Crypt-Password, PBKDF2-Password,
   SSHA2-512-Password, NT-Password or Cleartext-Password credentials.
 - Per-user PAP attempt limits and Accept/Reject logging.
+- Optional client-specific PAP VPN profiles with MikroTik PPP groups, IP pools,
+  filters and session limits.
+- Optional MAC admission for UniFi and MikroTik, with device-specific VLANs and
+  an explicit quarantine profile.
 - Optional EAP-TLS with CA, issuer, clientAuth EKU and certificate policy
   checks; CRL or OCSP revocation and dynamic VLAN replies.
 - Optional accounting to local detail files or asynchronously to PostgreSQL,
@@ -38,11 +43,23 @@ assignment, and optional accounting over IPv4 UDP.
   192-bit profile enforcement.
 - PostgreSQL server, database and login creation; existing-schema migrations and
   accounting retention or backups.
-- Firewall rules, network tunnels and certificate provisioning.
+- Firewall rules, network tunnels, NAS IP pools and PPP profiles, and
+  certificate provisioning.
+- RouterOS administrative logins using MS-CHAPv2, UniFi VPN integration, and
+  CoA/Disconnect.
 
 ## Requirements
 
 - RADIUS clients must send Message-Authenticator on every Access-Request.
+- VPN authorization expects PAP with Service-Type Framed-User and
+  Framed-Protocol PPP, such as MikroTik OpenVPN with user-auth-method=pap.
+  Referenced PPP profiles, IP pools and filters must already exist on the
+  gateway.
+- MAB requires a configured client service discriminator, Ethernet or
+  Wireless-802.11 NAS-Port-Type, and the MAC address in User-Name, User-Password
+  and Calling-Station-Id. Set RouterOS
+  mac-auth-mode=mac-as-username-and-password. Enable RADIUS-assigned VLANs in
+  UniFi; provision VLANs and their isolation rules on both platforms.
 - EAP-TLS requires FreeRADIUS 3.2+, a PEM server certificate chain and key, and
   a client CA bundle readable by the service account. The switch or AP must
   support standard RADIUS tunnel attributes for dynamic VLAN assignment.
@@ -119,14 +136,72 @@ freeradius_password_attribute: Crypt-Password
 
 Type: `list`. Required: `false`.
 
-Authoritative local PAP users; an empty list disables PAP without affecting
-EAP-TLS.
+Authoritative local PAP users; an empty list disables user authentication
+without affecting EAP-TLS or MAB.
 
 Default:
 
 ```yaml
 freeradius_users: []
 ```
+
+### `freeradius_authorization_enabled`
+
+Type: `bool`. Required: `false`.
+
+Require a VPN profile grant after PAP authentication; false preserves
+credential-only PAP.
+
+Default:
+
+```yaml
+freeradius_authorization_enabled: false
+```
+
+### `freeradius_access_profiles`
+
+Type: `list`. Required: `false`.
+
+Named VPN and MAB reply profiles; values refer to resources already provisioned
+on the NAS.
+
+Default:
+
+```yaml
+freeradius_access_profiles: []
+```
+
+### `freeradius_mab_enabled`
+
+Type: `bool`. Required: `false`.
+
+Enable MAC admission on clients with the mab service; requires profile
+authorization enabled.
+
+Default:
+
+```yaml
+freeradius_mab_enabled: false
+```
+
+### `freeradius_mab_devices`
+
+Type: `list`. Required: `false`.
+
+MAC devices and client-specific grants; absent grants select quarantine after
+valid MAC credentials.
+
+Default:
+
+```yaml
+freeradius_mab_devices: []
+```
+
+### `freeradius_mab_quarantine_profile`
+
+Type: `str`. Required: `false`.
+
+Required when MAB is enabled; name of a mab profile with the quarantine VLAN.
 
 ### `freeradius_failure_limit`
 
@@ -446,6 +521,8 @@ reapplied with the same inputs.
 
 ## Security Notes
 
+- MAB identifies devices by spoofable MAC addresses. VLAN isolation and the
+  quarantine firewall policy must be enforced by the NAS/network.
 - The default listener binds to loopback. Only configured clients are admitted;
   /0 networks and duplicate client secrets are rejected.
 - RADIUS authentication and accounting traffic is not transport-encrypted;
@@ -465,10 +542,27 @@ reapplied with the same inputs.
 
 ## Operational Notes
 
+- Molecule checks RADIUS responses on the supported server platforms. Actual
+  VLAN, PPP profile, pool and filter enforcement requires a separate hardware
+  check on the deployed UniFi/MikroTik devices; it is not covered by these
+  tests.
+- freeradius_authorization_enabled requires a matching user access grant and a
+  client with services: [vpn]. Profiles are applied only after successful
+  authentication and session checks. Disabled authorization preserves
+  credential-only PAP.
+- MAB additionally requires freeradius_mab_enabled and the client service mab.
+  Select mab_service_type to match the NAS: UniFi typically sends Call-Check,
+  RouterOS dot1x can send Framed-User. Confirm the attributes on the deployed
+  firmware.
+- MAC case and plain, colon, hyphen or dotted notation are normalized. Valid
+  matching MAC credentials without a device grant receive the quarantine
+  profile; malformed or inconsistent credentials are rejected. No user login
+  falls back to quarantine. Empty device lists quarantine all valid MAB
+  requests. MAC admission bypasses PAP attempt and SQL session limits.
 - The role replaces radiusd.conf and the local users file. Client and user lists
-  are authoritative. An empty freeradius_users list disables PAP authentication;
-  enabled accounting accepts records from configured clients independently of
-  the local user list.
+  are authoritative. An empty freeradius_users list disables local user
+  authentication; enabled accounting accepts records from configured clients
+  independently of the local user list.
 - User passwords must match freeradius_password_attribute, with an optional
   per-user password_attribute override. The default Crypt-Password accepts
   SHA-512 crypt or yescrypt hashes; yescrypt requires support in the target
@@ -515,6 +609,75 @@ reapplied with the same inputs.
 | Debian | Ubuntu | latest | [jomrr/molecule-ubuntu:latest](https://hub.docker.com/r/jomrr/molecule-ubuntu) |
 
 ## Example Playbook
+
+### MikroTik PAP VPN authorization
+
+Use OpenVPN user-auth-method=pap and enable PPP RADIUS authentication.
+Create vpn-staff, vpn-pool and vpn-filter on the gateway.
+
+```yaml
+- name: Configure VPN admission
+  hosts: radius_servers
+  gather_facts: true
+  roles:
+    - role: jomrr.freeradius
+      freeradius_listen_address: 192.0.2.10
+      freeradius_authorization_enabled: true
+      freeradius_clients:
+        - name: mikrotik_vpn
+          address: 192.0.2.20
+          secret: "{{ vault_vpn_radius_secret }}"
+          services: [vpn]
+      freeradius_access_profiles:
+        - name: vpn_staff
+          kind: vpn
+          mikrotik_group: vpn-staff
+          framed_pool: vpn-pool
+          filter_id: vpn-filter
+          session_timeout: 3600
+          idle_timeout: 600
+      freeradius_users:
+        - name: alice
+          password: "{{ vault_radius_alice_password_hash }}"
+          access:
+            - {client: mikrotik_vpn, profile: vpn_staff}
+```
+
+### UniFi and MikroTik MAC admission with quarantine
+
+Example VLANs 300 and 999 need printer and quarantine firewall policies.
+Verify NAS request attributes before rollout.
+
+```yaml
+- name: Configure device admission
+  hosts: radius_servers
+  gather_facts: true
+  roles:
+    - role: jomrr.freeradius
+      freeradius_listen_address: 192.0.2.10
+      freeradius_authorization_enabled: true
+      freeradius_mab_enabled: true
+      freeradius_mab_quarantine_profile: quarantine
+      freeradius_clients:
+        - name: unifi_switch
+          address: 192.0.2.30
+          secret: "{{ vault_unifi_radius_secret }}"
+          services: [mab]
+          mab_service_type: Call-Check
+        - name: mikrotik_switch
+          address: 192.0.2.40
+          secret: "{{ vault_mikrotik_radius_secret }}"
+          services: [mab]
+          mab_service_type: Framed-User
+      freeradius_access_profiles:
+        - {name: printers, kind: mab, vlan_id: 300}
+        - {name: quarantine, kind: mab, vlan_id: 999, session_timeout: 300}
+      freeradius_mab_devices:
+        - mac: '00:11:22:33:44:55'
+          access:
+            - {client: unifi_switch, profile: printers}
+            - {client: mikrotik_switch, profile: printers}
+```
 
 ### EAP-TLS with certificate policy VLANs
 
@@ -591,6 +754,9 @@ Vault holds a random client secret and a SHA-512 crypt or yescrypt user hash.
 
 ## References
 
+- [MikroTik RADIUS attributes](https://manual.mikrotik.com/docs/authentication-authorization-accounting/radius/)
+- [MikroTik OpenVPN](https://help.mikrotik.com/docs/spaces/ROS/pages/2031655/OpenVPN)
+- [UniFi MAC VLAN assignment](https://help.ui.com/hc/en-us/articles/115004589707-MAC-Based-VLAN-Assignment-Using-802-1x-in-UniFi-Network)
 - [EAP-TLS configuration](https://github.com/FreeRADIUS/freeradius-server/blob/v3.2.x/raddb/mods-available/eap)
 - [Buffered SQL](https://github.com/FreeRADIUS/freeradius-server/blob/v3.2.x/raddb/sites-available/buffered-sql)
 - [FreeRADIUS configuration](https://wiki.freeradius.org/config/Configuration-files)

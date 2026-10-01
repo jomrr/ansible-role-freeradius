@@ -4,7 +4,7 @@
 
 galaxy_info:
   author: Jonas Mauer
-  description: Configure FreeRADIUS with PAP, optional EAP-TLS VLAN policies and buffered PostgreSQL accounting.
+  description: Configure FreeRADIUS with PAP VPN profiles, MAC admission, EAP-TLS VLAN policies and buffered accounting.
   galaxy_tags:
     - radius
     - freeradius

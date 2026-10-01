@@ -8,7 +8,9 @@
       ansible.builtin.include_role:
         name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
       vars:
-        freeradius_clients: "{{ __freeradius_invalid_client.clients }}"
+        freeradius_clients: "{{ __freeradius_invalid_client.clients | default(hostvars[inventory_hostname].freeradius_clients) }}"
+        freeradius_mab_devices: "{{ __freeradius_invalid_client.devices | default(hostvars[inventory_hostname].freeradius_mab_devices) }}"
+        freeradius_access_profiles: "{{ __freeradius_invalid_client.profiles | default(hostvars[inventory_hostname].freeradius_access_profiles) }}"
 
     - name: FREERADIUS | Fail when unsafe clients are accepted
       ansible.builtin.fail:

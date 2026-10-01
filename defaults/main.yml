@@ -51,6 +51,8 @@ freeradius_clients: []
 # - name: access_switch
 #   address: 192.0.2.20
 #   secret: "{{ vault_radius_client_secret }}"
+#   services: [vpn, mab]
+#   mab_service_type: Call-Check
 
 # Default FreeRADIUS attribute for local PAP credentials.
 # Choices: Crypt-Password, PBKDF2-Password, SSHA2-512-Password, NT-Password, Cleartext-Password
@@ -61,6 +63,35 @@ freeradius_users: []
 # - name: alice
 #   password: "{{ vault_radius_alice_password_hash }}"
 #   password_attribute: Crypt-Password
+#   access:
+#     - {client: access_switch, profile: vpn_staff}
+
+# Require client-specific VPN profile grants after successful PAP authentication.
+freeradius_authorization_enabled: false
+
+# Named VPN and MAB reply profiles referencing existing NAS resources.
+freeradius_access_profiles: []
+# - name: vpn_staff
+#   kind: vpn
+#   mikrotik_group: vpn-staff
+#   framed_pool: vpn-pool
+#   filter_id: vpn-filter
+#   session_timeout: 3600
+# - name: printers
+#   kind: mab
+#   vlan_id: 100
+
+# Enable MAC admission on explicitly permitted NAS clients; requires authorization.
+freeradius_mab_enabled: false
+
+# MAC devices with at most one profile grant per configured NAS client.
+freeradius_mab_devices: []
+# - mac: '00:11:22:33:44:55'
+#   access:
+#     - {client: access_switch, profile: printers}
+
+# MAB profile for devices without a grant, required when MAC admission is enabled.
+# freeradius_mab_quarantine_profile: quarantine
 
 # Maximum attempts per local user before rejecting further requests until expiry.
 freeradius_failure_limit: 5

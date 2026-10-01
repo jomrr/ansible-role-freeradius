@@ -1,0 +1,162 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/access.yml
+
+- name: FREERADIUS | Exercise VPN and MAC admission boundaries
+  ansible.builtin.include_tasks: authenticate.yml
+  vars:
+    __freeradius_test_port: 1812
+    __freeradius_test_secret: "{{ __freeradius_probe.secret | default('molecule-radius-secret-2026') }}"
+    __freeradius_test_source: "{{ __freeradius_probe.source | default('127.0.0.1') }}"
+    __freeradius_test_username: "{{ __freeradius_probe.username }}"
+    __freeradius_test_password: "{{ __freeradius_probe.password }}"
+    __freeradius_rejected_password: incorrect-password
+    __freeradius_test_attributes: "{{ __freeradius_probe.attributes }}"
+    __freeradius_expected_auth_response: "{{ __freeradius_probe.response | default('Access-Accept') }}"
+    __freeradius_expected_attributes: "{{ __freeradius_probe.reply | default([]) }}"
+  loop:
+    - name: vpn_profile
+      username: molecule
+      password: molecule-password
+      attributes: &vpn_attributes {Service-Type: Framed-User, Framed-Protocol: PPP}
+      reply:
+        - 'Mikrotik-Group = "vpn-staff"'
+        - 'Framed-Pool = "vpn-pool"'
+        - 'Filter-Id = "vpn-filter"'
+        - 'Session-Timeout = 3600'
+        - 'Idle-Timeout = 600'
+    - name: vpn_without_grant
+      username: no_profile
+      password: molecule-password
+      attributes: *vpn_attributes
+      response: Access-Reject
+    - name: vpn_wrong_nas
+      username: yescrypt
+      password: molecule-password
+      source: 127.0.0.3
+      secret: molecule-unassigned-secret-2026
+      attributes: *vpn_attributes
+      response: Access-Reject
+    - name: vpn_wrong_service
+      username: cleartext
+      password: molecule-password
+      attributes: {Service-Type: Login-User, Framed-Protocol: PPP}
+      response: Access-Reject
+    - name: unifi_printer
+      username: AABBCCDDEEFF
+      password: aa:bb:cc:dd:ee:ff
+      attributes: &unifi_mab
+        Service-Type: Call-Check
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: aabb.ccdd.eeff
+      reply: &printer_reply
+        - 'Tunnel-Type:0 = VLAN'
+        - 'Tunnel-Medium-Type:0 = IEEE-802'
+        - 'Tunnel-Private-Group-Id:0 = "300"'
+        - 'Session-Timeout = 600'
+        - 'Idle-Timeout = 120'
+    - name: unifi_wifi
+      username: aa-bb-cc-dd-ee-ff
+      password: AABB.CCDD.EEFF
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Wireless-802.11
+        Calling-Station-Id: AA:BB:CC:DD:EE:FF
+      reply: *printer_reply
+    - name: mikrotik_printer
+      username: aabb.ccdd.eeff
+      password: AA-BB-CC-DD-EE-FF
+      source: 127.0.0.2
+      secret: molecule-mikrotik-secret-2026
+      attributes:
+        Service-Type: Framed-User
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: aa:bb:cc:dd:ee:ff
+      reply: *printer_reply
+    - name: unknown_mac
+      username: '112233445566'
+      password: '11:22:33:44:55:66'
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: '11-22-33-44-55-66'
+      reply: &quarantine_reply
+        - 'Tunnel-Type:0 = VLAN'
+        - 'Tunnel-Medium-Type:0 = IEEE-802'
+        - 'Tunnel-Private-Group-Id:0 = "999"'
+        - 'Session-Timeout = 120'
+    - name: mac_without_nas_grant
+      username: 1234567890ab
+      password: 12:34:56:78:90:ab
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: 12:34:56:78:90:ab
+      reply: *quarantine_reply
+    - name: incorrect_mac_password
+      username: AABBCCDDEEFF
+      password: '112233445566'
+      attributes: *unifi_mab
+      response: Access-Reject
+    - name: missing_station_mac
+      username: AABBCCDDEEFF
+      password: AABBCCDDEEFF
+      attributes: {Service-Type: Call-Check, NAS-Port-Type: Ethernet}
+      response: Access-Reject
+    - name: mismatched_station_mac
+      username: AABBCCDDEEFF
+      password: AABBCCDDEEFF
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: '112233445566'
+      response: Access-Reject
+    - name: malformed_mac
+      username: not-a-mac
+      password: AABBCCDDEEFF
+      attributes: *unifi_mab
+      response: Access-Reject
+    - name: incorrect_port_type
+      username: AABBCCDDEEFF
+      password: AABBCCDDEEFF
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Virtual
+        Calling-Station-Id: AABBCCDDEEFF
+      response: Access-Reject
+    - name: incorrect_service_type
+      username: AABBCCDDEEFF
+      password: AABBCCDDEEFF
+      attributes:
+        Service-Type: Login-User
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: AABBCCDDEEFF
+      response: Access-Reject
+    - name: client_without_mab_service
+      username: AABBCCDDEEFF
+      password: AABBCCDDEEFF
+      source: 127.0.0.3
+      secret: molecule-unassigned-secret-2026
+      attributes: *unifi_mab
+      response: Access-Reject
+  loop_control:
+    loop_var: __freeradius_probe
+    label: "{{ __freeradius_probe.name }}"
+
+- name: FREERADIUS | Read admission audit events
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -o, cat]
+  changed_when: false
+  register: __freeradius_access_audit
+
+- name: FREERADIUS | Verify VPN and MAC audit classification
+  ansible.builtin.assert:
+    that:
+      - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
+      - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
+      - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
+      - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
+      - "'molecule-password' not in __freeradius_access_audit.stdout"
+    quiet: true
