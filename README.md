@@ -605,14 +605,18 @@ reapplied with the same inputs.
   resets the counter. Counters reset on restart and are not shared between
   servers.
 - Enable freeradius_accounting_enabled for accounting, using UDP 1813 by
-  default. The detail backend keeps daily local files; postgresql forwards them
-  asynchronously. A database outage buffers accounting locally and leaves PAP
-  available unless a session limit is enabled.
-- SQL mode consumes existing detail files and removes processed files. Keep
-  pending files unchanged on persistent local storage, outside log rotation, and
-  monitor free space. Buffering covers database outages, but does not guarantee
-  durability on storage failure. Status types without a SQL query are skipped;
-  database errors remain queued.
+  default. The detail backend writes to ansible-accounting/detail. The
+  postgresql backend forwards accounting asynchronously; database outages leave
+  PAP available unless a session limit is enabled.
+- Configure external logrotate retention for the fixed detail file in detail
+  mode. The role does not install a rotation policy. Existing detail-YYYYMMDD
+  files are not renamed or removed; handle their retention separately.
+- SQL mode writes dated detail-YYYYMMDD queue files and consumes detail-* files,
+  removing processed files. The fixed detail file is not imported into SQL. Keep
+  pending queue files unchanged on persistent local storage, outside log
+  rotation, and monitor free space. Buffering covers database outages, but does
+  not guarantee durability on storage failure. Status types without a SQL query
+  are skipped; database errors remain queued.
 - Enable freeradius_postgresql_initialize_schema to initialize an empty
   database. While enabled, every role run requires database connectivity and
   freeradius_postgresql_schema_user/password; disable it after initialization if

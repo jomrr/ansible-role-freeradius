@@ -206,7 +206,7 @@ modules {
     expr {
     }
     detail {
-        filename = "{{ __freeradius_log_dir }}/ansible-accounting/detail-%Y%m%d"
+        filename = "{{ __freeradius_log_dir }}/ansible-accounting/{{ 'detail' if freeradius_accounting_backend == 'detail' else 'detail-%Y%m%d' }}"
         permissions = 0600
         locking = yes
         dates_as_integer = yes

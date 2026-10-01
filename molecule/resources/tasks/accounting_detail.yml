@@ -17,13 +17,13 @@
   become_user: root
   ansible.builtin.find:
     paths: "{{ __freeradius_log_dir }}/ansible-accounting"
-    patterns: detail-????????
+    patterns: detail
   register: __freeradius_detail_files
 
 - name: FREERADIUS | Verify private accounting records exist
   ansible.builtin.assert:
     that:
-      - __freeradius_detail_files.matched > 0
+      - __freeradius_detail_files.matched == 1
       - __freeradius_detail_files.files | map(attribute='mode') | unique | list == ['0600']
       - __freeradius_detail_files.files | map(attribute='pw_name') | unique | list == [__freeradius_user]
     quiet: true
