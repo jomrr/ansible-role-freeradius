@@ -6,43 +6,8 @@
   hosts: radius_servers
   gather_facts: true
   tasks:
-    - name: FREERADIUS | Load platform settings for verification
-      ansible.builtin.include_vars:
-        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
-
-    - name: FREERADIUS | Read service state
-      ansible.builtin.service_facts:
-
-    - name: FREERADIUS | Verify service is running and enabled
-      ansible.builtin.assert:
-        that:
-          - ansible_facts.services[__freeradius_service + '.service'].state == 'running'
-          - ansible_facts.services[__freeradius_service + '.service'].status == 'enabled'
-        quiet: true
-
-    - name: FREERADIUS | Inspect credential file permissions
-      become: true
-      become_user: root
-      ansible.builtin.stat:
-        path: "{{ __freeradius_config_dir }}/{{ __freeradius_file }}"
-      loop:
-        - radiusd.conf
-        - ansible-users
-      loop_control:
-        loop_var: __freeradius_file
-      register: __freeradius_permissions
-
-    - name: FREERADIUS | Verify credentials are protected
-      ansible.builtin.assert:
-        that:
-          - __freeradius_permission.stat.mode == '0640'
-          - __freeradius_permission.stat.pw_name == 'root'
-          - __freeradius_permission.stat.gr_name == __freeradius_group
-        quiet: true
-      loop: "{{ __freeradius_permissions.results }}"
-      loop_control:
-        loop_var: __freeradius_permission
-        label: "{{ __freeradius_permission.stat.path }}"
+    - name: FREERADIUS | Verify service state and credential permissions
+      ansible.builtin.import_tasks: ../tasks/service.yml
 
     - name: FREERADIUS | Verify EAP-TLS certificate authorization and VLAN mapping
       ansible.builtin.include_tasks: ../tasks/eap_tls.yml
@@ -68,14 +33,19 @@
 
     - name: FREERADIUS | Verify every supported credential format
       ansible.builtin.include_tasks: ../tasks/authenticate.yml
-      loop: [molecule, yescrypt, pbkdf2, ssha512, cleartext, nthash]
+      loop: >-
+        {{ ['molecule', 'yescrypt', 'pbkdf2', 'ssha512', 'cleartext', 'nthash'] |
+           product(['molecule-password', 'incorrect-password']) | list }}
       loop_control:
-        loop_var: __freeradius_test_username
+        loop_var: __freeradius_credential_probe
+        label: "{{ __freeradius_credential_probe.0 }} / {{ __freeradius_expected_auth_response }}"
       vars:
         __freeradius_test_port: 1812
         __freeradius_test_secret: molecule-radius-secret-2026
-        __freeradius_test_password: molecule-password
-        __freeradius_rejected_password: incorrect-password
+        __freeradius_test_username: "{{ __freeradius_credential_probe.0 }}"
+        __freeradius_test_password: "{{ __freeradius_credential_probe.1 }}"
+        __freeradius_expected_auth_response: >-
+          {{ 'Access-Accept' if __freeradius_credential_probe.1 == 'molecule-password' else 'Access-Reject' }}
 
     - name: FREERADIUS | Verify VPN and MAC access profiles
       ansible.builtin.import_tasks: ../tasks/access.yml
@@ -88,6 +58,7 @@
 
     - name: FREERADIUS | Verify unsafe client definitions are rejected
       ansible.builtin.include_tasks: ../tasks/invalid_client.yml
+      run_once: true
       loop:
         - name: unrestricted_network
           clients:

@@ -10,7 +10,6 @@
     __freeradius_test_source: "{{ __freeradius_probe.source | default('127.0.0.1') }}"
     __freeradius_test_username: "{{ __freeradius_probe.username }}"
     __freeradius_test_password: "{{ __freeradius_probe.password }}"
-    __freeradius_rejected_password: incorrect-password
     __freeradius_test_attributes: "{{ __freeradius_probe.attributes }}"
     __freeradius_expected_auth_response: "{{ __freeradius_probe.response | default('Access-Accept') }}"
     __freeradius_expected_attributes: "{{ __freeradius_probe.reply | default([]) }}"
@@ -98,6 +97,19 @@
       password: '112233445566'
       attributes: *unifi_mab
       response: Access-Reject
+    - name: malformed_mac_password
+      username: AABBCCDDEEFF
+      password: incorrect-password
+      attributes: *unifi_mab
+      response: Access-Reject
+    - name: incorrect_unknown_mac_password
+      username: '112233445566'
+      password: incorrect-password
+      attributes:
+        Service-Type: Call-Check
+        NAS-Port-Type: Ethernet
+        Calling-Station-Id: '11-22-33-44-55-66'
+      response: Access-Reject
     - name: missing_station_mac
       username: AABBCCDDEEFF
       password: AABBCCDDEEFF
@@ -139,24 +151,28 @@
       secret: molecule-unassigned-secret-2026
       attributes: *unifi_mab
       response: Access-Reject
+  when: __freeradius_access_cases is not defined or __freeradius_probe.name in __freeradius_access_cases
   loop_control:
     loop_var: __freeradius_probe
     label: "{{ __freeradius_probe.name }}"
 
-- name: FREERADIUS | Read admission audit events
-  become: true
-  become_user: root
-  ansible.builtin.command:
-    argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -o, cat]
-  changed_when: false
-  register: __freeradius_access_audit
+- name: FREERADIUS | Verify audit events after the full admission matrix
+  when: __freeradius_access_cases is not defined
+  block:
+    - name: FREERADIUS | Read admission audit events
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -o, cat]
+      changed_when: false
+      register: __freeradius_access_audit
 
-- name: FREERADIUS | Verify VPN and MAC audit classification
-  ansible.builtin.assert:
-    that:
-      - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
-      - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
-      - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
-      - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
-      - "'molecule-password' not in __freeradius_access_audit.stdout"
-    quiet: true
+    - name: FREERADIUS | Verify VPN and MAC audit classification
+      ansible.builtin.assert:
+        that:
+          - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
+          - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
+          - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
+          - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
+          - "'molecule-password' not in __freeradius_access_audit.stdout"
+        quiet: true

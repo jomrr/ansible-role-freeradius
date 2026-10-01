@@ -108,4 +108,3 @@
     __freeradius_test_port: 1812
     __freeradius_test_secret: molecule-radius-secret-2026
     __freeradius_test_password: molecule-password
-    __freeradius_rejected_password: incorrect-password

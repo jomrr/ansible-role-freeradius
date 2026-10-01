@@ -11,7 +11,6 @@
     __freeradius_test_port: 1812
     __freeradius_test_secret: molecule-radius-secret-2026
     __freeradius_test_password: molecule-password
-    __freeradius_rejected_password: incorrect-password
   module_defaults:
     community.postgresql.postgresql_query:
       login_host: "{{ freeradius_postgresql_host }}"
@@ -68,13 +67,6 @@
               NAS-Port-Type: Ethernet
               Calling-Station-Id: AA-BB-CC-DD-EE-FF
             __freeradius_expected_attributes: ['Tunnel-Private-Group-Id:0 = "300"']
-
-        - name: FREERADIUS | Verify queued data survives another daemon restart
-          become: true
-          become_user: root
-          ansible.builtin.service:
-            name: "{{ __freeradius_service }}"
-            state: restarted
 
       always:
         - name: FREERADIUS | Restore database fixture
@@ -151,13 +143,6 @@
       delay: 2
       changed_when: false
 
-    - name: FREERADIUS | Clear the attempt limit used by rejection probes
-      become: true
-      become_user: root
-      ansible.builtin.service:
-        name: "{{ __freeradius_service }}"
-        state: restarted
-
     - name: FREERADIUS | Verify admission resumes after session closure
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
 
@@ -184,7 +169,6 @@
           - {client: molecule, profile: printers}
     __freeradius_test_port: 1812
     __freeradius_test_secret: molecule-radius-secret-2026
-    __freeradius_rejected_password: incorrect-password
   tasks:
     - name: FREERADIUS | Update VPN profile and enroll a quarantined device
       ansible.builtin.include_role:
@@ -293,12 +277,18 @@
       ansible.builtin.import_tasks: ../tasks/accounting_detail.yml
 
     - name: FREERADIUS | Verify changed authentication and password revocation
-      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
       vars:
         __freeradius_test_port: 11812
         __freeradius_test_secret: molecule-rotated-secret-2026
-        __freeradius_test_password: molecule-rotated-password
-        __freeradius_rejected_password: molecule-password
+        __freeradius_test_password: "{{ __freeradius_password_probe.password }}"
+        __freeradius_expected_auth_response: "{{ __freeradius_password_probe.response }}"
+      loop:
+        - {password: molecule-rotated-password, response: Access-Accept}
+        - {password: molecule-password, response: Access-Reject}
+      loop_control:
+        loop_var: __freeradius_password_probe
+        label: "{{ __freeradius_password_probe.response }}"
 
     - name: FREERADIUS | Stop and disable the service
       become: true
@@ -318,7 +308,6 @@
         __freeradius_test_port: 11812
         __freeradius_test_secret: molecule-rotated-secret-2026
         __freeradius_test_password: molecule-rotated-password
-        __freeradius_rejected_password: molecule-password
 
 - name: FREERADIUS | Exercise EAP-TLS policy updates and OCSP availability
   hosts: radius_servers

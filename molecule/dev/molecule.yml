@@ -6,7 +6,6 @@ dependency:
   name: "galaxy"
   options:
     requirements-file: "${MOLECULE_PROJECT_DIRECTORY}/collections.yml"
-    role-file: "${MOLECULE_PROJECT_DIRECTORY}/collections.yml"
 driver:
   name: "podman"
 provisioner:
@@ -157,7 +156,7 @@ scenario:
     - "side_effect"
     - "converge"
     - "idempotence"
-    - "verify"
+    - "verify ../resources/playbooks/verify_restore.yml"
     - "destroy"
   name: "dev"
 platforms:
