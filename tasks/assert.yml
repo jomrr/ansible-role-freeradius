@@ -8,6 +8,10 @@
       - freeradius_listen_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\Z')
       - freeradius_port >= 1
       - freeradius_port <= 65535
+      - freeradius_failure_limit >= 1
+      - freeradius_failure_limit <= 1000
+      - freeradius_failure_window >= 10
+      - freeradius_failure_window <= 86400
       - freeradius_clients | map(attribute='name') | unique | length == freeradius_clients | length
       - freeradius_users | map(attribute='name') | unique | length == freeradius_users | length
     quiet: true
@@ -25,12 +29,19 @@
 - name: FREERADIUS | Validate client network syntax
   ansible.builtin.assert:
     that:
-      - __freeradius_client_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?\Z')
+      - __freeradius_client_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/([1-9]|[12][0-9]|3[0-2]))?\Z')
     quiet: true
   loop: "{{ freeradius_clients | map(attribute='address') }}"
   loop_control:
     loop_var: __freeradius_client_address
     label: "{{ __freeradius_client_address }}"
+
+- name: FREERADIUS | Require a distinct shared secret for each client
+  ansible.builtin.assert:
+    that:
+      - freeradius_clients | map(attribute='secret') | unique(case_sensitive=true) | length == freeradius_clients | length
+    quiet: true
+  no_log: true
 
 - name: FREERADIUS | Validate shared secret length and literal syntax
   ansible.builtin.assert:
@@ -54,11 +65,12 @@
     loop_var: __freeradius_username
     label: "{{ __freeradius_username }}"
 
-- name: FREERADIUS | Validate single-line passwords
+- name: FREERADIUS | Validate credentials against the selected password attribute
   ansible.builtin.assert:
     that:
-      - __freeradius_account.password | length > 0
-      - __freeradius_account.password is not search('[\x00\r\n]')
+      - >-
+        __freeradius_account.password is match(
+          __freeradius_password_patterns[__freeradius_account.password_attribute | default(freeradius_password_attribute)])
     quiet: true
   loop: "{{ freeradius_users }}"
   loop_control:

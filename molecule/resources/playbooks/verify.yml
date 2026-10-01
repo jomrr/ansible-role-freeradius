@@ -44,10 +44,32 @@
         loop_var: __freeradius_permission
         label: "{{ __freeradius_permission.stat.path }}"
 
-    - name: FREERADIUS | Verify accepted and rejected requests
-      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+    - name: FREERADIUS | Verify every supported credential format
+      ansible.builtin.include_tasks: ../tasks/authenticate.yml
+      loop: [molecule, yescrypt, pbkdf2, ssha512, cleartext, nthash]
+      loop_control:
+        loop_var: __freeradius_test_username
       vars:
         __freeradius_test_port: 1812
         __freeradius_test_secret: molecule-radius-secret-2026
         __freeradius_test_password: molecule-password
         __freeradius_rejected_password: incorrect-password
+
+    - name: FREERADIUS | Verify attempt limiting and audit events
+      ansible.builtin.import_tasks: ../tasks/security.yml
+
+    - name: FREERADIUS | Verify unsafe client definitions are rejected
+      ansible.builtin.include_tasks: ../tasks/invalid_client.yml
+      loop:
+        - name: unrestricted_network
+          clients:
+            - {name: everywhere, address: 0.0.0.0/0, secret: molecule-radius-secret-2026}
+          failed_task: FREERADIUS | Validate client network syntax
+        - name: repeated_secret
+          clients:
+            - {name: first, address: 192.0.2.1, secret: molecule-radius-secret-2026}
+            - {name: second, address: 192.0.2.2, secret: molecule-radius-secret-2026}
+          failed_task: FREERADIUS | Require a distinct shared secret for each client
+      loop_control:
+        loop_var: __freeradius_invalid_client
+        label: "{{ __freeradius_invalid_client.name }}"

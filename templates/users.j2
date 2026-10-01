@@ -2,5 +2,5 @@
 # file: {{ template_destpath }}
 
 {% for __freeradius_account in freeradius_users %}
-{{ __freeradius_account.name | to_json }} Cleartext-Password := '{{ __freeradius_account.password | replace('\\', '\\\\') | replace("'", "\\'") }}'
+{{ __freeradius_account.name | to_json }} {{ __freeradius_account.password_attribute | default(freeradius_password_attribute) }} := '{{ __freeradius_account.password | replace('\\', '\\\\') | replace("'", "\\'") }}'
 {% endfor %}

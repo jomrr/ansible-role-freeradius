@@ -14,10 +14,21 @@ freeradius_clients: []
 #   address: 192.0.2.20
 #   secret: "{{ vault_radius_client_secret }}"
 
-# Authoritative local PAP users with nonempty single-line passwords.
+# Default FreeRADIUS attribute for local PAP credentials.
+# Choices: Crypt-Password, PBKDF2-Password, SSHA2-512-Password, NT-Password, Cleartext-Password
+freeradius_password_attribute: Crypt-Password
+
+# Authoritative local PAP users with credentials and optional attribute overrides.
 freeradius_users: []
 # - name: alice
-#   password: "{{ vault_radius_alice_password }}"
+#   password: "{{ vault_radius_alice_password_hash }}"
+#   password_attribute: Crypt-Password
+
+# Maximum attempts per local user before rejecting further requests until expiry.
+freeradius_failure_limit: 5
+
+# Fixed attempt window in seconds, reset by successful authentication.
+freeradius_failure_window: 300
 
 # Back up managed configuration, including any credentials it contains.
 freeradius_backup: false

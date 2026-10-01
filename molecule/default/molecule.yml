@@ -28,13 +28,29 @@ provisioner:
   inventory:
     group_vars:
       all:
+        freeradius_failure_limit: 3
+        freeradius_failure_window: 30
         freeradius_clients:
           - name: "molecule"
             address: "127.0.0.1"
             secret: "molecule-radius-secret-2026"
         freeradius_users:
           - name: "molecule"
+            password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
+          - name: "yescrypt"
+            password: "$$y$$j9T$$4t5m3NETzIbg3nUDVlDFk0$$.vWIX7aKYcYjuS2ZRRp3LYuGpPxdXCfSqMHftxJFEK9"
+          - name: "pbkdf2"
+            password_attribute: "PBKDF2-Password"
+            password: "$$PBKDF2$$HMACSHA2+256:10000:bW9sZWN1bGUtcmFkaXVzLXRlc3Q=$$EVuwQXzj4cnInQKgJV0ebDNOsB9bH8cPn93w1zV4Mc8="
+          - name: "ssha512"
+            password_attribute: "SSHA2-512-Password"
+            password: "UvtgGlsFQrNfyW1K6piCcunSJk9xmlSnC7/mtLymenxSdcVlhG2vcSUbcAZF/4THoFcaqdq7QumhEZc3Aj3NBG1vbGVjdWxlLXJhZGl1cy10ZXN0"
+          - name: "cleartext"
+            password_attribute: "Cleartext-Password"
             password: "molecule-password"
+          - name: "nthash"
+            password_attribute: "NT-Password"
+            password: "296c92fcc9aaaa38289733d6d46c931a"
 verifier:
   name: "ansible"
 scenario:

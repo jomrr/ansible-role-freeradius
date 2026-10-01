@@ -15,7 +15,7 @@ proxy_requests = no
 log {
     destination = syslog
     syslog_facility = daemon
-    auth = no
+    auth = yes
     auth_badpass = no
     auth_goodpass = no
 }
@@ -51,6 +51,24 @@ modules {
     pap {
         normalise = yes
     }
+    always reject {
+        rcode = reject
+    }
+    cache login_attempts {
+        driver = "rlm_cache_rbtree"
+        key = "%{User-Name}"
+        ttl = {{ freeradius_failure_window }}
+        add_stats = yes
+        update {
+            &control:Tmp-String-0 := "password_check"
+        }
+    }
+    linelog auth_audit {
+        filename = syslog
+        syslog_facility = authpriv
+        syslog_severity = info
+        format = "event=radius_auth result=%{reply:Packet-Type} user_hex=%{hex:&User-Name} client=%{client:shortname} source=%{Packet-Src-IP-Address} stage=%{control:Tmp-String-0}"
+    }
 }
 
 server default {
@@ -60,12 +78,53 @@ server default {
         port = {{ freeradius_port }}
     }
     authorize {
+        update control {
+            Tmp-String-0 := "unknown_user"
+        }
         files
+        # Only configured users allocate cache entries; no credentials are cached.
+        if (&control:Crypt-Password || &control:PBKDF2-Password || &control:SSHA2-512-Password || &control:NT-Password || &control:Cleartext-Password) {
+            # The rbtree mutex serializes hit increments, including parallel requests.
+            login_attempts {
+                fail = 1
+            }
+            if (fail) {
+                update control {
+                    Tmp-String-0 := "cache_error"
+                }
+                reject
+            }
+            # A new entry has zero hits and represents the first admitted attempt.
+            if (&request:Cache-Entry-Hits >= {{ freeradius_failure_limit }}) {
+                update control {
+                    Tmp-String-0 := "rate_limit"
+                }
+                reject
+            }
+        }
+        # FreeRADIUS 3 does not infer Auth-Type from PBKDF2-Password.
+        if (&request:User-Password && &control:PBKDF2-Password) {
+            update control {
+                Auth-Type := PAP
+            }
+        }
         pap
     }
     authenticate {
         Auth-Type PAP {
             pap
+        }
+    }
+    post-auth {
+        # Read-only prevents concurrent successful requests recreating a deleted entry.
+        update control {
+            Cache-TTL := 0
+            Cache-Read-Only := yes
+        }
+        login_attempts
+        auth_audit
+        Post-Auth-Type REJECT {
+            auth_audit
         }
     }
 }

@@ -28,13 +28,25 @@ argument_specs:
           address:
             type: str
             required: true
-            description: IPv4 address or CIDR network permitted to send RADIUS requests.
+            description: IPv4 address or CIDR network permitted to send RADIUS requests;
+              /0 is forbidden.
           secret:
             type: str
             required: true
             no_log: true
-            description: Shared secret of 16 to 128 characters; letters, digits and ._~!@#%^&*+=:/?-
-              are accepted.
+            description: Unique shared secret of 16 to 128 characters; letters, digits and
+              ._~!@#%^&*+=:/?- are accepted.
+      freeradius_password_attribute:
+        type: str
+        default: Crypt-Password
+        choices:
+          - Crypt-Password
+          - PBKDF2-Password
+          - SSHA2-512-Password
+          - NT-Password
+          - Cleartext-Password
+        description: Default FreeRADIUS credential attribute; PAP permits hashes without
+          requiring cleartext storage.
       freeradius_users:
         type: list
         elements: dict
@@ -50,8 +62,27 @@ argument_specs:
             type: str
             required: true
             no_log: true
-            description: Nonempty single-line cleartext password; store the inventory value
-              in Ansible Vault.
+            description: Credential matching password_attribute; hashes are the default
+              and cleartext requires explicit selection.
+          password_attribute:
+            type: str
+            choices:
+              - Crypt-Password
+              - PBKDF2-Password
+              - SSHA2-512-Password
+              - NT-Password
+              - Cleartext-Password
+            description: Optional per-user override of freeradius_password_attribute.
+      freeradius_failure_limit:
+        type: int
+        default: 5
+        description: Maximum admitted attempts per user in a fixed window, from 1 to 1000;
+          success resets the counter.
+      freeradius_failure_window:
+        type: int
+        default: 300
+        description: Fixed attempt window in seconds, from 10 to 86400; blocked requests
+          do not extend it.
       freeradius_backup:
         type: bool
         default: false

@@ -13,7 +13,7 @@
         secret: molecule-rotated-secret-2026
     freeradius_users:
       - name: molecule
-        password: molecule-rotated-password
+        password: '$6$moleculerotated$Nn3rS7eZJh/1TvQv/GmfSn5EBpo5ZTHTpKmGsNFmXly6vw1YEwXoizeHQNBgpBfI71ASB0bj6mCJh5/Xl0Dt7.'
   tasks:
     - name: FREERADIUS | Rotate credentials and move the listener
       ansible.builtin.include_role:

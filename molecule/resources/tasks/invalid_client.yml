@@ -1,0 +1,22 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/invalid_client.yml
+
+- name: FREERADIUS | Exercise rejection before configuration changes
+  block:
+    - name: FREERADIUS | Apply an unsafe client definition
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_clients: "{{ __freeradius_invalid_client.clients }}"
+
+    - name: FREERADIUS | Fail when unsafe clients are accepted
+      ansible.builtin.fail:
+        msg: Unsafe client definitions must be rejected.
+
+  rescue:
+    - name: FREERADIUS | Verify rejection came from the client constraint
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task.name == __freeradius_invalid_client.failed_task
+        quiet: true

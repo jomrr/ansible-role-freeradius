@@ -1,0 +1,105 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/security.yml
+
+- name: FREERADIUS | Exercise resets after successful authentication
+  ansible.builtin.command:
+    argv: [radclient, -x, -r, '3', -t, '3', -p, '1', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+    stdin: |
+      {% for __freeradius_password in ['molecule-password', 'wrong', 'wrong', 'molecule-password', 'wrong', 'wrong', 'molecule-password'] %}
+      User-Name = "molecule"
+      User-Password = "{{ __freeradius_password }}"
+      Message-Authenticator = 0x00
+
+      {% endfor %}
+  changed_when: false
+  failed_when: false
+  register: __freeradius_reset
+
+- name: FREERADIUS | Verify successful requests reset the counter
+  ansible.builtin.assert:
+    that:
+      - __freeradius_reset.stdout | regex_findall('Received Access-Accept') | length == 3
+      - __freeradius_reset.stdout | regex_findall('Received Access-Reject') | length == 4
+    fail_msg: "{{ __freeradius_reset.stdout }} {{ __freeradius_reset.stderr }}"
+    quiet: true
+
+- name: FREERADIUS | Record journal cursor before parallel attempts
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -n, '1', --show-cursor, -o, cat]
+  changed_when: false
+  register: __freeradius_audit_cursor
+
+- name: FREERADIUS | Send parallel invalid authentication requests
+  ansible.builtin.command:
+    argv: [radclient, -x, -r, '3', -t, '3', -p, '8', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+    stdin: |
+      {% for __freeradius_attempt in range(8) %}
+      User-Name = "molecule"
+      User-Password = "incorrect-password"
+      Message-Authenticator = 0x00
+
+      {% endfor %}
+  changed_when: false
+  failed_when: false
+  register: __freeradius_parallel
+
+- name: FREERADIUS | Check locked and unrelated accounts
+  ansible.builtin.command:
+    argv: [radclient, -x, -r, '3', -t, '3', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
+    stdin: |
+      {% for __freeradius_name in ['molecule', 'yescrypt', 'unknown'] %}
+      User-Name = "{{ __freeradius_name }}"
+      User-Password = "molecule-password"
+      Message-Authenticator = 0x00
+
+      {% endfor %}
+  changed_when: false
+  failed_when: false
+  register: __freeradius_locked
+
+- name: FREERADIUS | Read new authentication events
+  become: true
+  become_user: root
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - --no-pager
+      - -u
+      - "{{ __freeradius_service }}"
+      - -o
+      - cat
+      - "--after-cursor={{ __freeradius_audit_cursor.stdout_lines[-1] | regex_replace('^-- cursor: ', '') }}"
+  changed_when: false
+  register: __freeradius_audit
+
+- name: FREERADIUS | Verify lockout isolation and credential-free audit events
+  ansible.builtin.assert:
+    that:
+      - __freeradius_parallel.stdout | regex_findall('Received Access-Reject') | length == 8
+      - __freeradius_locked.stdout | regex_findall('Received Access-Accept') | length == 1
+      - __freeradius_locked.stdout | regex_findall('Received Access-Reject') | length == 2
+      - __freeradius_audit.stdout | regex_findall('stage=rate_limit') | length == 6
+      - "'event=radius_auth result=Access-Accept' in __freeradius_audit.stdout"
+      - "'user_hex=6d6f6c6563756c65 client=molecule source=127.0.0.1' in __freeradius_audit.stdout"
+      - "'stage=unknown_user' in __freeradius_audit.stdout"
+      - "'molecule-password' not in __freeradius_audit.stdout"
+      - "'incorrect-password' not in __freeradius_audit.stdout"
+      - "'$6$' not in __freeradius_audit.stdout"
+      - "'$y$' not in __freeradius_audit.stdout"
+    fail_msg: "{{ __freeradius_parallel.stdout }} {{ __freeradius_locked.stdout }} {{ __freeradius_audit.stdout }}"
+    quiet: true
+
+- name: FREERADIUS | Wait for the attempt window to expire
+  ansible.builtin.pause:
+    seconds: "{{ freeradius_failure_window + 1 }}"
+
+- name: FREERADIUS | Verify authentication after expiry
+  ansible.builtin.import_tasks: authenticate.yml
+  vars:
+    __freeradius_test_port: 1812
+    __freeradius_test_secret: molecule-radius-secret-2026
+    __freeradius_test_password: molecule-password
+    __freeradius_rejected_password: incorrect-password
