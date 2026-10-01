@@ -10,6 +10,10 @@
       Debian: freeradius-utils
       RedHat: freeradius-utils
       Suse: freeradius-server-utils
+    __freeradius_eap_test_packages:
+      Debian: eapoltest
+      RedHat: wpa_supplicant
+      Suse: wpa_supplicant
   tasks:
     - name: FREERADIUS | Refresh APT package metadata
       become: true
@@ -18,6 +22,10 @@
         update_cache: true
       when: ansible_facts.pkg_mgr == 'apt'
 
+    - name: FREERADIUS | Load certificate fixture ownership
+      ansible.builtin.include_vars:
+        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
     - name: FREERADIUS | Install RADIUS protocol test client
       become: true
       become_user: root
@@ -25,7 +33,17 @@
         name:
           - "{{ __freeradius_test_packages[ansible_facts.os_family] }}"
           - python3-psycopg2
+          - "{{ __freeradius_eap_test_packages[ansible_facts.os_family] }}"
+          - "{{ __freeradius_packages[0] }}"
+          - openssl
         state: present
+
+    - name: FREERADIUS | Generate temporary certificate authorities and client profiles
+      become: true
+      become_user: root
+      ansible.builtin.script:
+        cmd: "../files/create-eap-fixtures {{ __freeradius_group }}"
+        creates: /etc/freeradius-molecule-pki/ready
 
     - name: FREERADIUS | Wait for database fixture
       ansible.builtin.wait_for:

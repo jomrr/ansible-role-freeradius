@@ -36,6 +36,17 @@ provisioner:
         freeradius_postgresql_password: "molecule-postgresql-secret-2026"
         freeradius_postgresql_ssl_mode: "disable"
         freeradius_postgresql_initialize_schema: true
+        freeradius_eap_tls_enabled: true
+        freeradius_eap_tls_certificate_file: "/etc/freeradius-molecule-pki/server.pem"
+        freeradius_eap_tls_private_key_file: "/etc/freeradius-molecule-pki/server.key"
+        freeradius_eap_tls_ca_file: "/etc/freeradius-molecule-pki/trust.pem"
+        freeradius_eap_tls_issuer: "/CN=Molecule ca"
+        freeradius_eap_tls_ca_path: "/etc/freeradius-molecule-pki/trust"
+        freeradius_eap_tls_vlan_policies:
+          - oid: "1.3.6.1.4.1.32473.1"
+            vlan_id: 100
+          - oid: "1.3.6.1.4.1.32473.2"
+            vlan_id: 200
         freeradius_failure_limit: 3
         freeradius_failure_window: 30
         freeradius_clients:

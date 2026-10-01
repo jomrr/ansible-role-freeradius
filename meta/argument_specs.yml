@@ -4,7 +4,8 @@
 
 argument_specs:
   main:
-    short_description: Configure FreeRADIUS clients, local PAP users and accounting.
+    short_description: Configure FreeRADIUS clients, PAP users, EAP-TLS certificate policies
+      and accounting.
     options:
       freeradius_listen_address:
         type: str
@@ -53,7 +54,8 @@ argument_specs:
         type: list
         elements: dict
         default: []
-        description: Authoritative local PAP users; an empty list denies all authentication.
+        description: Authoritative local PAP users; an empty list disables PAP without affecting
+          EAP-TLS.
         options:
           name:
             type: str
@@ -78,8 +80,8 @@ argument_specs:
       freeradius_failure_limit:
         type: int
         default: 5
-        description: Maximum admitted attempts per user in a fixed window, from 1 to 1000;
-          success resets the counter.
+        description: Maximum admitted PAP attempts per local user in a fixed window, from
+          1 to 1000; success resets the counter.
       freeradius_failure_window:
         type: int
         default: 300
@@ -150,5 +152,66 @@ argument_specs:
       freeradius_simultaneous_use:
         type: int
         default: 0
-        description: Open SQL sessions allowed per local user; zero disables checking, positive
-          values require postgresql.
+        description: Open SQL sessions allowed per local PAP user; zero disables checking,
+          positive values require postgresql.
+      freeradius_eap_tls_enabled:
+        type: bool
+        default: false
+        description: Enable certificate-only EAP-TLS with TLS 1.2 or 1.3 alongside local
+          PAP; requires FreeRADIUS 3.2 or newer.
+      freeradius_eap_tls_certificate_file:
+        type: path
+        description: Required for EAP-TLS; absolute PEM server certificate chain path on
+          the RADIUS host.
+      freeradius_eap_tls_private_key_file:
+        type: path
+        description: Required for EAP-TLS; absolute PEM server private key path on the RADIUS
+          host, readable by the service account.
+      freeradius_eap_tls_private_key_password:
+        type: str
+        default: ''
+        no_log: true
+        description: Private key password; empty for an unencrypted key. Letters, digits
+          and ._~!@#^&*+=:/?- are accepted.
+      freeradius_eap_tls_ca_file:
+        type: path
+        description: Required for EAP-TLS; absolute PEM client CA bundle path on the RADIUS
+          host.
+      freeradius_eap_tls_issuer:
+        type: str
+        description: Required for EAP-TLS; exact client issuer DN in OpenSSL compat format,
+          such as /O=Example/CN=Device CA.
+      freeradius_eap_tls_revocation:
+        type: str
+        default: crl
+        choices:
+          - crl
+          - ocsp
+          - none
+        description: Certificate revocation policy; crl and ocsp reject unavailable or invalid
+          revocation information.
+      freeradius_eap_tls_ca_path:
+        type: path
+        default: ''
+        description: Required for crl; absolute OpenSSL-rehashed CA and CRL directory, refreshed
+          by FreeRADIUS every 300 seconds.
+      freeradius_eap_tls_ocsp_url:
+        type: str
+        default: ''
+        description: Required for ocsp; explicit HTTP responder URL. Signed responses and
+          nonces are required; timeout is five seconds.
+      freeradius_eap_tls_vlan_policies:
+        type: list
+        elements: dict
+        default: []
+        description: Required nonempty for EAP-TLS; exactly one policy must match. Certificate
+          policies with qualifiers are rejected.
+        options:
+          oid:
+            type: str
+            required: true
+            description: Unique numeric certificate policy OID, matched as a complete value.
+          vlan_id:
+            type: int
+            required: true
+            description: VLAN ID from 1 to 4094 returned in the standard RADIUS tunnel attributes.

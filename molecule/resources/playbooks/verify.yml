@@ -44,6 +44,28 @@
         loop_var: __freeradius_permission
         label: "{{ __freeradius_permission.stat.path }}"
 
+    - name: FREERADIUS | Verify EAP-TLS certificate authorization and VLAN mapping
+      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      loop:
+        - {profile: staff, result: accept, vlan_hex: '313030'}
+        - profile: guest
+          result: accept
+          vlan_hex: '323030'
+          phase1: tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0
+        - {profile: missing_policy, result: reject}
+        - {profile: unknown_policy, result: reject}
+        - {profile: multiple_policy, result: reject}
+        - {profile: missing_eku, result: reject}
+        - {profile: wrong_eku, result: reject}
+        - {profile: wrong_issuer, result: reject}
+        - {profile: untrusted, result: reject}
+        - {profile: revoked, result: reject}
+        - {profile: expired, result: reject}
+        - {profile: qualified, result: reject}
+      loop_control:
+        loop_var: __freeradius_eap_probe
+        label: "{{ __freeradius_eap_probe.profile }}"
+
     - name: FREERADIUS | Verify every supported credential format
       ansible.builtin.include_tasks: ../tasks/authenticate.yml
       loop: [molecule, yescrypt, pbkdf2, ssha512, cleartext, nthash]

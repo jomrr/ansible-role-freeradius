@@ -4,7 +4,7 @@
 
 galaxy_info:
   author: Jonas Mauer
-  description: Configure FreeRADIUS with local PAP authentication and optional buffered PostgreSQL accounting.
+  description: Configure FreeRADIUS with PAP, optional EAP-TLS VLAN policies and buffered PostgreSQL accounting.
   galaxy_tags:
     - radius
     - freeradius

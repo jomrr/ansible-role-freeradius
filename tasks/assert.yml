@@ -51,6 +51,50 @@
   when: freeradius_accounting_backend == 'postgresql'
   no_log: true
 
+- name: FREERADIUS | Require EAP-TLS certificate inputs
+  ansible.builtin.assert:
+    that:
+      - freeradius_eap_tls_certificate_file is defined
+      - freeradius_eap_tls_private_key_file is defined
+      - freeradius_eap_tls_ca_file is defined
+      - freeradius_eap_tls_issuer is defined
+    quiet: true
+  when: freeradius_eap_tls_enabled
+
+- name: FREERADIUS | Validate EAP-TLS trust and revocation settings
+  ansible.builtin.assert:
+    that:
+      - freeradius_eap_tls_certificate_file is match('^/[A-Za-z0-9_./-]+\Z')
+      - freeradius_eap_tls_private_key_file is match('^/[A-Za-z0-9_./-]+\Z')
+      - freeradius_eap_tls_ca_file is match('^/[A-Za-z0-9_./-]+\Z')
+      - freeradius_eap_tls_issuer is match('^/[A-Za-z0-9 /.,=@_+-]+\Z')
+      - freeradius_eap_tls_revocation != 'crl' or freeradius_eap_tls_ca_path is match('^/[A-Za-z0-9_./-]+\Z')
+      - freeradius_eap_tls_revocation != 'ocsp' or freeradius_eap_tls_ocsp_url is match('^http://[A-Za-z0-9.:/_?-]+\Z')
+      - freeradius_eap_tls_vlan_policies | length > 0
+      - freeradius_eap_tls_vlan_policies | map(attribute='oid') | unique | length == freeradius_eap_tls_vlan_policies | length
+    quiet: true
+  when: freeradius_eap_tls_enabled
+
+- name: FREERADIUS | Validate EAP-TLS VLAN policy mappings
+  ansible.builtin.assert:
+    that:
+      - __freeradius_policy.oid is match('^(0\.[0-3]?[0-9]|1\.[0-3]?[0-9]|2\.(0|[1-9][0-9]*))(\.(0|[1-9][0-9]*))+\Z')
+      - __freeradius_policy.vlan_id >= 1
+      - __freeradius_policy.vlan_id <= 4094
+    quiet: true
+  loop: "{{ freeradius_eap_tls_vlan_policies }}"
+  loop_control:
+    loop_var: __freeradius_policy
+    label: "{{ __freeradius_policy.oid }}"
+
+- name: FREERADIUS | Validate EAP-TLS private key password literal
+  ansible.builtin.assert:
+    that:
+      - freeradius_eap_tls_private_key_password is match('^[A-Za-z0-9._~!@#^&*+=:/?-]*\Z')
+    quiet: true
+  when: freeradius_eap_tls_enabled
+  no_log: true
+
 - name: FREERADIUS | Validate client identifiers
   ansible.builtin.assert:
     that:

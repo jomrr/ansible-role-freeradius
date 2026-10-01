@@ -167,6 +167,91 @@
         __freeradius_test_password: molecule-rotated-password
         __freeradius_rejected_password: molecule-password
 
+- name: FREERADIUS | Exercise EAP-TLS policy updates and OCSP availability
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_users: []
+    freeradius_eap_tls_revocation: ocsp
+    freeradius_eap_tls_ocsp_url: http://127.0.0.1:8888/
+    freeradius_eap_tls_vlan_policies:
+      - {oid: '1.3.6.1.4.1.32473.1', vlan_id: 400}
+  tasks:
+    - name: FREERADIUS | Apply certificate-only authentication with updated VLAN policy
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+
+    - name: FREERADIUS | Serve three signed OCSP responses from the test CA
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - ocsp
+          - -index
+          - ca/index
+          - -port
+          - '8888'
+          - -rsigner
+          - ca/cert.pem
+          - -rkey
+          - ca/key.pem
+          - -CA
+          - ca/cert.pem
+          - -nrequest
+          - '3'
+        chdir: /etc/freeradius-molecule-pki
+      async: 90
+      poll: 0
+      changed_when: true
+      register: __freeradius_ocsp_fixture
+
+    - name: FREERADIUS | Verify OCSP and the changed VLAN without PAP users
+      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      loop:
+        - {profile: staff, result: accept, vlan_hex: '343030'}
+        - {profile: revoked, result: reject}
+      loop_control:
+        loop_var: __freeradius_eap_probe
+        label: "{{ __freeradius_eap_probe.profile }}"
+
+    - name: FREERADIUS | Wait for OCSP fixture to finish its three requests
+      become: true
+      become_user: root
+      ansible.builtin.async_status:
+        jid: "{{ __freeradius_ocsp_fixture.ansible_job_id }}"
+      register: __freeradius_ocsp_finished
+      until: __freeradius_ocsp_finished.finished
+      retries: 10
+      delay: 1
+
+    - name: FREERADIUS | Verify OCSP outage denies a valid certificate
+      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      vars:
+        __freeradius_eap_probe: {profile: staff, result: reject}
+
+    - name: FREERADIUS | Explicitly disable certificate revocation checking
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_eap_tls_revocation: none
+
+    - name: FREERADIUS | Verify the explicit revocation exception
+      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      vars:
+        __freeradius_eap_probe: {profile: revoked, result: accept, vlan_hex: '343030'}
+
+    - name: FREERADIUS | Disable optional EAP-TLS
+      ansible.builtin.include_role:
+        name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+      vars:
+        freeradius_eap_tls_enabled: false
+
+    - name: FREERADIUS | Verify disabled EAP-TLS denies certificate authentication
+      ansible.builtin.include_tasks: ../tasks/eap_tls.yml
+      vars:
+        __freeradius_eap_probe: {profile: staff, result: reject}
+
 - name: FREERADIUS | Exercise empty access lists
   hosts: radius_servers
   gather_facts: true

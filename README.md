@@ -6,13 +6,13 @@
 [![dev](https://img.shields.io/github/actions/workflow/status/jomrr/ansible-role-freeradius/dev.yml?branch=dev&label=dev)](https://github.com/jomrr/ansible-role-freeradius/actions/workflows/dev.yml?query=branch%3Adev)
 [![main](https://img.shields.io/github/actions/workflow/status/jomrr/ansible-role-freeradius/main.yml?branch=main&label=main)](https://github.com/jomrr/ansible-role-freeradius/actions/workflows/main.yml?query=branch%3Amain)
 
-Configure FreeRADIUS with local PAP authentication and optional buffered
+Configure FreeRADIUS with PAP, optional EAP-TLS VLAN policies and buffered
 PostgreSQL accounting.
 
 ## Purpose
 
-Run a FreeRADIUS 3 server for local PAP authentication and optional RADIUS
-accounting over IPv4 UDP.
+Run FreeRADIUS for local PAP, optional EAP-TLS with certificate-based VLAN
+assignment, and optional accounting over IPv4 UDP.
 
 ## Scope
 
@@ -22,7 +22,9 @@ accounting over IPv4 UDP.
   enabled, running service.
 - Local PAP authentication with Crypt-Password, PBKDF2-Password,
   SSHA2-512-Password, NT-Password or Cleartext-Password credentials.
-- Per-user authentication attempt limits and Accept/Reject logging.
+- Per-user PAP attempt limits and Accept/Reject logging.
+- Optional EAP-TLS with CA, issuer, clientAuth EKU and certificate policy
+  checks; CRL or OCSP revocation and dynamic VLAN replies.
 - Optional accounting to local detail files or asynchronously to PostgreSQL,
   including PostgreSQL connection and TLS settings.
 - Optional PostgreSQL schema initialization and login limits based on open SQL
@@ -30,9 +32,10 @@ accounting over IPv4 UDP.
 
 ### Not Managed
 
-- Other authentication methods such as CHAP, MSCHAPv2 and EAP; LDAP, AD and SQL
-  authentication backends.
-- RADIUS over TLS, RADIUS proxying and dynamic VLAN assignment.
+- CHAP, MSCHAPv2 and other EAP methods; LDAP, AD and SQL authentication
+  backends.
+- RADIUS over TLS, RADIUS proxying, switch/AP configuration and WPA3-Enterprise
+  192-bit profile enforcement.
 - PostgreSQL server, database and login creation; existing-schema migrations and
   accounting retention or backups.
 - Firewall rules, network tunnels and certificate provisioning.
@@ -40,6 +43,9 @@ accounting over IPv4 UDP.
 ## Requirements
 
 - RADIUS clients must send Message-Authenticator on every Access-Request.
+- EAP-TLS requires FreeRADIUS 3.2+, a PEM server certificate chain and key, and
+  a client CA bundle readable by the service account. The switch or AP must
+  support standard RADIUS tunnel attributes for dynamic VLAN assignment.
 - PostgreSQL accounting requires an existing database and login. Use the
   distribution FreeRADIUS schema or let the role initialize it.
 - Optional schema initialization requires an empty database and CREATE
@@ -113,7 +119,8 @@ freeradius_password_attribute: Crypt-Password
 
 Type: `list`. Required: `false`.
 
-Authoritative local PAP users; an empty list denies all authentication.
+Authoritative local PAP users; an empty list disables PAP without affecting
+EAP-TLS.
 
 Default:
 
@@ -125,8 +132,8 @@ freeradius_users: []
 
 Type: `int`. Required: `false`.
 
-Maximum admitted attempts per user in a fixed window, from 1 to 1000; success
-resets the counter.
+Maximum admitted PAP attempts per local user in a fixed window, from 1 to 1000;
+success resets the counter.
 
 Default:
 
@@ -288,13 +295,118 @@ freeradius_postgresql_initialize_schema: false
 
 Type: `int`. Required: `false`.
 
-Open SQL sessions allowed per local user; zero disables checking, positive
+Open SQL sessions allowed per local PAP user; zero disables checking, positive
 values require postgresql.
 
 Default:
 
 ```yaml
 freeradius_simultaneous_use: 0
+```
+
+### `freeradius_eap_tls_enabled`
+
+Type: `bool`. Required: `false`.
+
+Enable certificate-only EAP-TLS with TLS 1.2 or 1.3 alongside local PAP;
+requires FreeRADIUS 3.2 or newer.
+
+Default:
+
+```yaml
+freeradius_eap_tls_enabled: false
+```
+
+### `freeradius_eap_tls_certificate_file`
+
+Type: `path`. Required: `false`.
+
+Required for EAP-TLS; absolute PEM server certificate chain path on the RADIUS
+host.
+
+### `freeradius_eap_tls_private_key_file`
+
+Type: `path`. Required: `false`.
+
+Required for EAP-TLS; absolute PEM server private key path on the RADIUS host,
+readable by the service account.
+
+### `freeradius_eap_tls_private_key_password`
+
+Type: `str`. Required: `false`.
+
+Private key password; empty for an unencrypted key. Letters, digits and
+._~!@#^&*+=:/?- are accepted.
+
+Default:
+
+```yaml
+freeradius_eap_tls_private_key_password: ''
+```
+
+### `freeradius_eap_tls_ca_file`
+
+Type: `path`. Required: `false`.
+
+Required for EAP-TLS; absolute PEM client CA bundle path on the RADIUS host.
+
+### `freeradius_eap_tls_issuer`
+
+Type: `str`. Required: `false`.
+
+Required for EAP-TLS; exact client issuer DN in OpenSSL compat format, such as
+/O=Example/CN=Device CA.
+
+### `freeradius_eap_tls_revocation`
+
+Type: `str`. Required: `false`.
+
+Certificate revocation policy; crl and ocsp reject unavailable or invalid
+revocation information.
+
+Default:
+
+```yaml
+freeradius_eap_tls_revocation: crl
+```
+
+### `freeradius_eap_tls_ca_path`
+
+Type: `path`. Required: `false`.
+
+Required for crl; absolute OpenSSL-rehashed CA and CRL directory, refreshed by
+FreeRADIUS every 300 seconds.
+
+Default:
+
+```yaml
+freeradius_eap_tls_ca_path: ''
+```
+
+### `freeradius_eap_tls_ocsp_url`
+
+Type: `str`. Required: `false`.
+
+Required for ocsp; explicit HTTP responder URL. Signed responses and nonces are
+required; timeout is five seconds.
+
+Default:
+
+```yaml
+freeradius_eap_tls_ocsp_url: ''
+```
+
+### `freeradius_eap_tls_vlan_policies`
+
+Type: `list`. Required: `false`.
+
+Required nonempty for EAP-TLS; exactly one policy must match. Certificate
+policies with qualifiers are rejected.
+
+Default:
+
+```yaml
+freeradius_eap_tls_vlan_policies: []
 ```
 
 ## Managed Files
@@ -347,6 +459,9 @@ reapplied with the same inputs.
   readable by the service account and by root when initializing the schema.
 - Authentication logs contain user and client identities, without passwords or
   stored hashes; configure retention in the host logging service.
+- EAP-TLS clients must validate the server CA and expected server name. Restrict
+  private key permissions to the service account. Selecting revocation mode none
+  permits revoked certificates until expiry.
 
 ## Operational Notes
 
@@ -358,10 +473,10 @@ reapplied with the same inputs.
   per-user password_attribute override. The default Crypt-Password accepts
   SHA-512 crypt or yescrypt hashes; yescrypt requires support in the target
   system's libcrypt.
-- Reaching freeradius_failure_limit blocks further requests, including valid
-  passwords, until the fixed freeradius_failure_window expires. Success before
-  the limit resets the counter. Counters reset on restart and are not shared
-  between servers.
+- Reaching freeradius_failure_limit blocks further PAP requests, including valid
+  passwords, until freeradius_failure_window expires. Success before the limit
+  resets the counter. Counters reset on restart and are not shared between
+  servers.
 - Enable freeradius_accounting_enabled for accounting, using UDP 1813 by
   default. The detail backend keeps daily local files; postgresql forwards them
   asynchronously. A database outage buffers accounting locally and leaves PAP
@@ -374,10 +489,19 @@ reapplied with the same inputs.
   database. While enabled, every role run requires database connectivity;
   disable it after initialization if convergence must work during database
   outages.
-- freeradius_simultaneous_use requires PostgreSQL; zero disables the limit. A
-  positive limit rejects logins when the recorded open-session count reaches the
-  limit or SQL lookup fails. Accounting delays and parallel logins prevent a
-  strict concurrent-session guarantee.
+- freeradius_simultaneous_use applies to local PAP users and requires
+  PostgreSQL; zero disables the limit. A positive limit rejects logins when the
+  recorded open-session count reaches the limit or SQL lookup fails. Accounting
+  delays and parallel logins prevent a strict concurrent-session guarantee.
+- EAP-TLS authenticates independently of freeradius_users. Exactly one
+  configured policy OID must match; missing or ambiguous matches and policy
+  qualifiers are rejected. TLS 1.2 and 1.3 are enabled; session resumption is
+  disabled.
+- CRL mode requires an OpenSSL-rehashed directory with current CA certificates
+  and CRLs for the full chain; it reloads every 300 seconds. OCSP mode requires
+  the configured responder to support nonces. Both modes reject failed
+  revocation checks. Certificate provisioning and renewal are external; restart
+  FreeRADIUS after replacing its certificate or key.
 
 ## Supported Platforms
 
@@ -391,6 +515,32 @@ reapplied with the same inputs.
 | Debian | Ubuntu | latest | [jomrr/molecule-ubuntu:latest](https://hub.docker.com/r/jomrr/molecule-ubuntu) |
 
 ## Example Playbook
+
+### EAP-TLS with certificate policy VLANs
+
+Provision PKI files first; use policy OIDs under the assigned PEN.
+
+```yaml
+- name: Configure certificate authentication
+  hosts: radius_servers
+  gather_facts: true
+  roles:
+    - role: jomrr.freeradius
+      freeradius_listen_address: 192.0.2.10
+      freeradius_clients:
+        - name: access_switch
+          address: 192.0.2.20
+          secret: "{{ vault_radius_client_secret }}"
+      freeradius_eap_tls_enabled: true
+      freeradius_eap_tls_certificate_file: /etc/radius-pki/server.pem
+      freeradius_eap_tls_private_key_file: /etc/radius-pki/server.key
+      freeradius_eap_tls_ca_file: /etc/radius-pki/ca.pem
+      freeradius_eap_tls_issuer: /O=Example/CN=Device CA
+      freeradius_eap_tls_ca_path: /etc/radius-pki/trust
+      freeradius_eap_tls_vlan_policies:
+        - {oid: '1.3.6.1.4.1.32473.1', vlan_id: 100}
+        - {oid: '1.3.6.1.4.1.32473.2', vlan_id: 200}
+```
 
 ### Buffered PostgreSQL accounting
 
@@ -441,6 +591,7 @@ Vault holds a random client secret and a SHA-512 crypt or yescrypt user hash.
 
 ## References
 
+- [EAP-TLS configuration](https://github.com/FreeRADIUS/freeradius-server/blob/v3.2.x/raddb/mods-available/eap)
 - [Buffered SQL](https://github.com/FreeRADIUS/freeradius-server/blob/v3.2.x/raddb/sites-available/buffered-sql)
 - [FreeRADIUS configuration](https://wiki.freeradius.org/config/Configuration-files)
 - [Native configuration check](https://www.freeradius.org/radiusd/man/radiusd.html)

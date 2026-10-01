@@ -43,7 +43,7 @@ freeradius_postgresql_ssl_root_cert: ''
 # Initialize the distribution FreeRADIUS schema in an existing empty database.
 freeradius_postgresql_initialize_schema: false
 
-# Maximum open SQL sessions per local user; zero disables admission checks.
+# Maximum open SQL sessions per local PAP user; zero disables admission checks.
 freeradius_simultaneous_use: 0
 
 # Authoritative RADIUS clients, all requiring Message-Authenticator.
@@ -65,8 +65,41 @@ freeradius_users: []
 # Maximum attempts per local user before rejecting further requests until expiry.
 freeradius_failure_limit: 5
 
-# Fixed attempt window in seconds, reset by successful authentication.
+# Fixed PAP attempt window in seconds, reset by successful PAP authentication.
 freeradius_failure_window: 300
+
+# Enable certificate-only EAP-TLS alongside local PAP authentication.
+freeradius_eap_tls_enabled: false
+
+# Server certificate chain in PEM format on the RADIUS host, required for EAP-TLS.
+# freeradius_eap_tls_certificate_file: /etc/radius-pki/server.pem
+
+# PEM private key on the RADIUS host, required for EAP-TLS.
+# freeradius_eap_tls_private_key_file: /etc/radius-pki/server.key
+
+# Password for an encrypted server private key; empty selects an unencrypted key.
+freeradius_eap_tls_private_key_password: ''
+
+# Trusted client CA bundle on the RADIUS host, required for EAP-TLS.
+# freeradius_eap_tls_ca_file: /etc/radius-pki/ca.pem
+
+# Exact client issuer DN in OpenSSL compat format, required for EAP-TLS.
+# freeradius_eap_tls_issuer: /O=Example/CN=Device CA
+
+# Certificate revocation policy; CRL and OCSP failures deny authentication.
+# Choices: crl, ocsp, none
+freeradius_eap_tls_revocation: crl
+
+# OpenSSL-rehashed CA and CRL directory on the RADIUS host, required for crl.
+freeradius_eap_tls_ca_path: ''
+
+# Explicit HTTP OCSP responder URL, required for ocsp.
+freeradius_eap_tls_ocsp_url: ''
+
+# Certificate policy OIDs mapped to VLAN IDs; exactly one mapping must match.
+freeradius_eap_tls_vlan_policies: []
+# - oid: '1.3.6.1.4.1.32473.1'
+#   vlan_id: 100
 
 # Back up managed configuration, including any credentials it contains.
 freeradius_backup: false

@@ -1,0 +1,61 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/eap_tls.yml
+
+- name: FREERADIUS | Configure certificate test supplicant
+  become: true
+  become_user: root
+  ansible.builtin.copy:
+    dest: /etc/freeradius-molecule-pki/eap.conf
+    mode: '0600'
+    content: |
+      network={
+          key_mgmt=WPA-EAP
+          eap=TLS
+          phase1="{{ __freeradius_eap_probe.phase1 | default('tls_disable_tlsv1_3=1') }}"
+          identity="molecule"
+          ca_cert="/etc/freeradius-molecule-pki/ca/cert.pem"
+          domain_suffix_match="radius.example.test"
+          client_cert="/etc/freeradius-molecule-pki/{{ __freeradius_eap_probe.profile }}.pem"
+          private_key="/etc/freeradius-molecule-pki/client.key"
+      }
+
+- name: FREERADIUS | Exchange EAP-TLS including session resumption attempts
+  become: true
+  become_user: root
+  # Some eapol_test builds print binary TLS session data; keep Ansible's UTF-8 validation enabled.
+  ansible.builtin.shell: |
+    set -o pipefail
+    eapol_test -c /etc/freeradius-molecule-pki/eap.conf -s molecule-radius-secret-2026 -t 10 -r 1 2>&1 |
+      LC_ALL=C tr -cd '\11\12\15\40-\176'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  failed_when: false
+  register: __freeradius_eap_result
+
+- name: FREERADIUS | Verify certificate acceptance and VLAN response
+  ansible.builtin.assert:
+    that:
+      - __freeradius_eap_result.rc == 0
+      - "'SUCCESS' in __freeradius_eap_result.stdout"
+      - >-
+        __freeradius_eap_result.stdout is search('Tunnel-Type[^\n]*\n +Value: 0000000d')
+      - >-
+        __freeradius_eap_result.stdout is search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006')
+      - >-
+        __freeradius_eap_result.stdout is search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_probe.vlan_hex)
+    fail_msg: "{{ __freeradius_eap_result.stdout }} {{ __freeradius_eap_result.stderr }}"
+    quiet: true
+  when: __freeradius_eap_probe.result == 'accept'
+
+- name: FREERADIUS | Verify certificate rejection without VLAN authorization
+  ansible.builtin.assert:
+    that:
+      - __freeradius_eap_result.rc != 0
+      - "'Access-Reject' in __freeradius_eap_result.stdout"
+      - "'Access-Accept' not in __freeradius_eap_result.stdout"
+      - "'Tunnel-Private-Group-Id' not in __freeradius_eap_result.stdout"
+    fail_msg: "{{ __freeradius_eap_result.stdout }} {{ __freeradius_eap_result.stderr }}"
+    quiet: true
+  when: __freeradius_eap_probe.result == 'reject'

@@ -1,0 +1,92 @@
+#!/bin/sh
+# role: freeradius
+# file: molecule/resources/files/create-eap-fixtures
+# Ephemeral certificates for protocol tests; no private keys are stored in Git.
+set -eu
+umask 027
+mkdir -p /etc/freeradius-molecule-pki
+cd /etc/freeradius-molecule-pki
+for authority in ca other untrusted; do
+    mkdir -p "$authority/newcerts"
+    : > "$authority/index"
+    echo 1000 > "$authority/serial"
+    echo 1000 > "$authority/crlnumber"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+        -subj "/CN=Molecule $authority" -keyout "$authority/key.pem" -out "$authority/cert.pem" \
+        -addext 'basicConstraints=critical,CA:true' -addext 'keyUsage=critical,keyCertSign,cRLSign'
+    cat > "$authority/ca.cnf" <<EOF
+[ca]
+default_ca = authority
+[authority]
+database = $authority/index
+serial = $authority/serial
+crlnumber = $authority/crlnumber
+new_certs_dir = $authority/newcerts
+certificate = $authority/cert.pem
+private_key = $authority/key.pem
+default_md = sha256
+default_days = 2
+default_crl_days = 1
+policy = names
+unique_subject = no
+[names]
+commonName = supplied
+EOF
+done
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out client.key
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out server.key
+for profile in server staff guest missing_policy unknown_policy multiple_policy missing_eku wrong_eku wrong_issuer untrusted revoked expired qualified; do
+    authority=ca
+    key=client.key
+    case "$profile" in
+        server) key=server.key ;;
+        wrong_issuer) authority=other ;;
+        untrusted) authority=untrusted ;;
+    esac
+    cat > "$profile.cnf" <<EOF
+[certificate]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature,keyEncipherment
+subjectAltName = DNS:radius.example.test
+EOF
+    case "$profile" in
+        missing_eku) ;;
+        server|wrong_eku) echo 'extendedKeyUsage = serverAuth' >> "$profile.cnf" ;;
+        guest) echo 'extendedKeyUsage = serverAuth,clientAuth' >> "$profile.cnf" ;;
+        *) echo 'extendedKeyUsage = clientAuth' >> "$profile.cnf" ;;
+    esac
+    case "$profile" in
+        server|missing_policy) ;;
+        guest) echo 'certificatePolicies = 1.3.6.1.4.1.32473.2' >> "$profile.cnf" ;;
+        unknown_policy) echo 'certificatePolicies = 1.3.6.1.4.1.32473.10' >> "$profile.cnf" ;;
+        multiple_policy) echo 'certificatePolicies = 1.3.6.1.4.1.32473.1,1.3.6.1.4.1.32473.2' >> "$profile.cnf" ;;
+        qualified)
+            cat >> "$profile.cnf" <<EOF
+certificatePolicies = @qualified
+[qualified]
+policyIdentifier = 1.3.6.1.4.1.32473.1
+CPS.1 = "https://ca.example.test/policy"
+EOF
+            ;;
+        *) echo 'certificatePolicies = 1.3.6.1.4.1.32473.1' >> "$profile.cnf" ;;
+    esac
+    openssl req -new -key "$key" -subj /CN=molecule -out "$profile.csr"
+    if [ "$profile" = expired ]; then
+        openssl ca -batch -notext -config "$authority/ca.cnf" -in "$profile.csr" -out "$profile.pem" \
+            -extfile "$profile.cnf" -extensions certificate -startdate 20200101000000Z -enddate 20210101000000Z
+    else
+        openssl ca -batch -notext -config "$authority/ca.cnf" -in "$profile.csr" -out "$profile.pem" \
+            -extfile "$profile.cnf" -extensions certificate
+    fi
+done
+openssl ca -batch -config ca/ca.cnf -revoke revoked.pem
+mkdir -p trust
+for authority in ca other; do
+    cp "$authority/cert.pem" "trust/$authority.pem"
+    openssl ca -batch -config "$authority/ca.cnf" -gencrl -out "trust/$authority.crl"
+done
+cat ca/cert.pem other/cert.pem > trust.pem
+openssl rehash trust
+chgrp -R "$1" /etc/freeradius-molecule-pki
+chmod 0640 server.key
+touch ready

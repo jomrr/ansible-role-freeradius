@@ -1,7 +1,7 @@
 [project]
 name = "freeradius"
 version = "0.0.0"
-description = "Configure FreeRADIUS with local PAP authentication and optional buffered PostgreSQL accounting."
+description = "Configure FreeRADIUS with PAP, optional EAP-TLS VLAN policies and buffered PostgreSQL accounting."
 requires-python = ">=3.12"
 authors = [
   { name = "Jonas Mauer" },
