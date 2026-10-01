@@ -4,7 +4,7 @@
 
 galaxy_info:
   author: Jonas Mauer
-  description: Install and configure a FreeRADIUS server with explicit clients and local PAP authentication.
+  description: Configure FreeRADIUS with local PAP authentication and optional buffered PostgreSQL accounting.
   galaxy_tags:
     - radius
     - freeradius

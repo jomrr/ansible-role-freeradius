@@ -44,6 +44,24 @@ client {{ __freeradius_client.name }} {
 }
 
 {% endfor %}
+{% if freeradius_accounting_enabled %}
+policy {
+    # Defined here because distribution policy.d files are not loaded.
+    acct_unique {
+        # NAS-Identifier alone is valid; PostgreSQL also needs a NAS address.
+        update request {
+            NAS-IP-Address = "%{Packet-Src-IP-Address}"
+        }
+        update request {
+            Acct-Unique-Session-Id := "%{md5:%{User-Name},%{Acct-Session-Id},%{NAS-IP-Address},%{NAS-Identifier},%{NAS-Port-ID},%{NAS-Port}}"
+            # Preserve the NAS timestamp; otherwise record receipt minus NAS delay.
+{% raw %}            Event-Timestamp = "%{expr:%l - %{%{Acct-Delay-Time}:-0}}"
+{% endraw %}
+        }
+    }
+}
+
+{% endif %}
 modules {
     files {
         filename = {{ __freeradius_config_dir }}/ansible-users
@@ -54,6 +72,54 @@ modules {
     always reject {
         rcode = reject
     }
+{% if freeradius_accounting_enabled %}
+    expr {
+    }
+    detail {
+        filename = "{{ __freeradius_log_dir }}/ansible-accounting/detail-%Y%m%d"
+        permissions = 0600
+        locking = yes
+    }
+{% endif %}
+{% if freeradius_accounting_backend == 'postgresql' %}
+    always ok {
+        rcode = ok
+    }
+    sql {
+        dialect = postgresql
+        driver = rlm_sql_postgresql
+        server = "{{ freeradius_postgresql_host }}"
+        port = {{ freeradius_postgresql_port }}
+        login = "{{ freeradius_postgresql_user }}"
+        password = "{{ freeradius_postgresql_password }}"
+        radius_db = "dbname='{{ freeradius_postgresql_database }}' sslmode={{ freeradius_postgresql_ssl_mode }}{% if freeradius_postgresql_ssl_root_cert %} sslrootcert='{{ freeradius_postgresql_ssl_root_cert }}'{% endif %}"
+        query_timeout = 5
+        read_clients = no
+        read_groups = no
+        read_profiles = no
+        delete_stale_sessions = no
+        acct_table1 = radacct
+        acct_table2 = radacct
+        postauth_table = radpostauth
+        authcheck_table = radcheck
+        authreply_table = radreply
+        groupcheck_table = radgroupcheck
+        groupreply_table = radgroupreply
+        usergroup_table = radusergroup
+        client_table = nas
+        group_attribute = SQL-Group
+        pool {
+            # No startup connection: an unavailable database must not stop RADIUS.
+            start = 0
+            min = 0
+            max = 4
+            spare = 1
+            retry_delay = 5
+            idle_timeout = 60
+        }
+        $INCLUDE {{ __freeradius_config_dir }}/mods-config/sql/main/postgresql/queries.conf
+    }
+{% endif %}
     cache login_attempts {
         driver = "rlm_cache_rbtree"
         key = "%{User-Name}"
@@ -77,6 +143,20 @@ server default {
         ipaddr = {{ freeradius_listen_address }}
         port = {{ freeradius_port }}
     }
+{% if freeradius_accounting_enabled %}
+    listen {
+        type = acct
+        ipaddr = {{ freeradius_listen_address }}
+        port = {{ freeradius_accounting_port }}
+    }
+    preacct {
+        acct_unique
+    }
+    accounting {
+        # The native accounting handler sends no response on fail/invalid/noop.
+        detail
+    }
+{% endif %}
     authorize {
         update control {
             Tmp-String-0 := "unknown_user"
@@ -116,6 +196,28 @@ server default {
         }
     }
     post-auth {
+{% if freeradius_simultaneous_use > 0 %}
+        # SQL xlat escapes interpolated attributes. An empty result means failure.
+        update control {
+            Simultaneous-Use := {{ freeradius_simultaneous_use }}
+            Tmp-String-1 := "%{sql:SELECT COUNT(*) FROM radacct WHERE username='%{User-Name}' AND acctstoptime IS NULL}"
+        }
+        if (&control:Tmp-String-1 !~ /^[0-9]+$/) {
+            update control {
+                Tmp-String-0 := "session_database_error"
+            }
+            reject
+        }
+        update control {
+            Tmp-Integer-0 := &control:Tmp-String-1
+        }
+        if (&control:Tmp-Integer-0 >= &control:Simultaneous-Use) {
+            update control {
+                Tmp-String-0 := "simultaneous_use"
+            }
+            reject
+        }
+{% endif %}
         # Read-only prevents concurrent successful requests recreating a deleted entry.
         update control {
             Cache-TTL := 0
@@ -128,3 +230,25 @@ server default {
         }
     }
 }
+{% if freeradius_accounting_backend == 'postgresql' %}
+
+server buffered-sql {
+    listen {
+        type = detail
+        filename = "{{ __freeradius_log_dir }}/ansible-accounting/detail-*"
+        load_factor = 10
+        poll_interval = 1
+        retry_interval = 5
+        track = yes
+    }
+    accounting {
+        sql {
+            noop = 1
+        }
+        # NAS restart events may successfully affect no sessions. Retain other noops.
+        if (noop && (&Acct-Status-Type == Accounting-On || &Acct-Status-Type == Accounting-Off)) {
+            ok
+        }
+    }
+}
+{% endif %}

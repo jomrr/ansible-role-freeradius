@@ -4,12 +4,13 @@
 
 argument_specs:
   main:
-    short_description: Configure FreeRADIUS clients and local PAP users.
+    short_description: Configure FreeRADIUS clients, local PAP users and accounting.
     options:
       freeradius_listen_address:
         type: str
         default: 127.0.0.1
-        description: IPv4 address on which to accept authentication requests.
+        description: IPv4 address on which to accept authentication and enabled accounting
+          requests.
       freeradius_port:
         type: int
         default: 1812
@@ -18,7 +19,8 @@ argument_specs:
         type: list
         elements: dict
         default: []
-        description: Authoritative list of RADIUS clients; every client must send Message-Authenticator.
+        description: Authoritative clients for authentication and accounting; Access-Request
+          requires Message-Authenticator.
         options:
           name:
             type: str
@@ -88,3 +90,65 @@ argument_specs:
         default: false
         description: Back up managed configuration before replacement; backups can contain
           credentials.
+      freeradius_accounting_enabled:
+        type: bool
+        default: false
+        description: Enable accounting for the configured clients on freeradius_listen_address.
+      freeradius_accounting_port:
+        type: int
+        default: 1813
+        description: UDP accounting port, from 1 to 65535; must differ from the authentication
+          port.
+      freeradius_accounting_backend:
+        type: str
+        default: detail
+        choices:
+          - detail
+          - postgresql
+        description: Keep local detail records or drain them into PostgreSQL; postgresql
+          requires accounting enabled.
+      freeradius_postgresql_host:
+        type: str
+        description: PostgreSQL hostname or IP address; required for the postgresql backend.
+      freeradius_postgresql_port:
+        type: int
+        default: 5432
+        description: PostgreSQL TCP port, from 1 to 65535.
+      freeradius_postgresql_database:
+        type: str
+        default: radius
+        description: Existing database containing the distribution FreeRADIUS schema; letters,
+          digits, underscores or hyphens.
+      freeradius_postgresql_user:
+        type: str
+        default: radius
+        description: Database identity; letters, digits, underscores or hyphens.
+      freeradius_postgresql_password:
+        type: str
+        no_log: true
+        description: Required for postgresql; 16 to 128 characters from the same alphabet
+          as client secrets.
+      freeradius_postgresql_ssl_mode:
+        type: str
+        default: verify-full
+        choices:
+          - disable
+          - require
+          - verify-ca
+          - verify-full
+        description: PostgreSQL TLS policy; verify-full verifies the certificate and hostname.
+      freeradius_postgresql_ssl_root_cert:
+        type: path
+        default: ''
+        description: Absolute CA certificate path on the RADIUS host; empty uses the libpq
+          default.
+      freeradius_postgresql_initialize_schema:
+        type: bool
+        default: false
+        description: Import the packaged schema when public.radacct is absent; requires
+          an existing empty database and CREATE rights.
+      freeradius_simultaneous_use:
+        type: int
+        default: 0
+        description: Open SQL sessions allowed per local user; zero disables checking, positive
+          values require postgresql.

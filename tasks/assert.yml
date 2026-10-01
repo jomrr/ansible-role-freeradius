@@ -8,6 +8,13 @@
       - freeradius_listen_address is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\Z')
       - freeradius_port >= 1
       - freeradius_port <= 65535
+      - freeradius_accounting_port >= 1
+      - freeradius_accounting_port <= 65535
+      - not freeradius_accounting_enabled or freeradius_accounting_port != freeradius_port
+      - freeradius_accounting_backend != 'postgresql' or freeradius_accounting_enabled
+      - not freeradius_postgresql_initialize_schema or freeradius_accounting_backend == 'postgresql'
+      - freeradius_simultaneous_use >= 0
+      - freeradius_simultaneous_use == 0 or freeradius_accounting_backend == 'postgresql'
       - freeradius_failure_limit >= 1
       - freeradius_failure_limit <= 1000
       - freeradius_failure_window >= 10
@@ -15,6 +22,34 @@
       - freeradius_clients | map(attribute='name') | unique | length == freeradius_clients | length
       - freeradius_users | map(attribute='name') | unique | length == freeradius_users | length
     quiet: true
+
+- name: FREERADIUS | Require PostgreSQL connection inputs for SQL accounting
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_host is defined
+      - freeradius_postgresql_password is defined
+    quiet: true
+  when: freeradius_accounting_backend == 'postgresql'
+
+- name: FREERADIUS | Validate PostgreSQL connection syntax
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_host is match('^[A-Za-z0-9_.:-]+\Z')
+      - freeradius_postgresql_database is match('^[A-Za-z0-9_-]+\Z')
+      - freeradius_postgresql_user is match('^[A-Za-z0-9_-]+\Z')
+      - freeradius_postgresql_port >= 1
+      - freeradius_postgresql_port <= 65535
+      - freeradius_postgresql_ssl_root_cert == '' or freeradius_postgresql_ssl_root_cert is match('^/[A-Za-z0-9_./-]+\Z')
+    quiet: true
+  when: freeradius_accounting_backend == 'postgresql'
+
+- name: FREERADIUS | Validate PostgreSQL password literal syntax
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_password is match('^[A-Za-z0-9._~!@#%^&*+=:/?-]{16,128}\Z')
+    quiet: true
+  when: freeradius_accounting_backend == 'postgresql'
+  no_log: true
 
 - name: FREERADIUS | Validate client identifiers
   ansible.builtin.assert:

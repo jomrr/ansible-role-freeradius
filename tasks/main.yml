@@ -31,6 +31,29 @@
     group: root
     mode: '0755'
 
+- name: FREERADIUS | Create private accounting directory
+  become: true
+  become_user: root
+  ansible.builtin.file:
+    path: "{{ __freeradius_log_dir }}/ansible-accounting"
+    state: directory
+    owner: "{{ __freeradius_user }}"
+    group: "{{ __freeradius_group }}"
+    mode: '0700'
+  when: freeradius_accounting_enabled
+
+- name: FREERADIUS | Install PostgreSQL driver
+  become: true
+  become_user: root
+  ansible.builtin.package:
+    name: "{{ __freeradius_postgresql_package }}"
+    state: present
+  when: freeradius_accounting_backend == 'postgresql'
+
+- name: FREERADIUS | Initialize PostgreSQL schema
+  ansible.builtin.include_tasks: postgresql_schema.yml
+  when: freeradius_postgresql_initialize_schema
+
 - name: FREERADIUS | Install configuration validator
   become: true
   become_user: root
@@ -55,7 +78,7 @@
   diff: false
   notify: restart radius
 
-- name: FREERADIUS | Configure authentication server
+- name: FREERADIUS | Configure RADIUS server
   become: true
   become_user: root
   ansible.builtin.template:

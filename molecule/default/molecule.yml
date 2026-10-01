@@ -27,7 +27,15 @@ provisioner:
     side_effect: "../resources/playbooks/side_effect.yml"
   inventory:
     group_vars:
-      all:
+      radius_servers:
+        freeradius_accounting_enabled: true
+        freeradius_accounting_backend: "postgresql"
+        freeradius_postgresql_host: "freeradius-accounting-db"
+        freeradius_postgresql_database: "{{ inventory_hostname | replace('-', '_') }}"
+        freeradius_postgresql_user: "postgres"
+        freeradius_postgresql_password: "molecule-postgresql-secret-2026"
+        freeradius_postgresql_ssl_mode: "disable"
+        freeradius_postgresql_initialize_schema: true
         freeradius_failure_limit: 3
         freeradius_failure_window: 30
         freeradius_clients:
@@ -76,7 +84,19 @@ platforms:
     pre_build_image: true
     override_command: false
     systemd: "true"
+    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
+    groups:
+      - "radius_servers"
     capabilities:
       - "SYS_ADMIN"
     security_opts:
       - "label=disable"
+  - name: "freeradius-accounting-db"
+    image: "docker.io/library/postgres:16-alpine"
+    pre_build_image: true
+    override_command: false
+    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
+    groups:
+      - "accounting_database"
+    env:
+      POSTGRES_PASSWORD: "molecule-postgresql-secret-2026"

@@ -2,11 +2,127 @@
 # role: freeradius
 # file: molecule/resources/playbooks/side_effect.yml
 
+- name: FREERADIUS | Exercise database outage and session admission
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_postgresql_initialize_schema: false
+    __freeradius_test_port: 1812
+    __freeradius_test_secret: molecule-radius-secret-2026
+    __freeradius_test_password: molecule-password
+    __freeradius_rejected_password: incorrect-password
+  module_defaults:
+    community.postgresql.postgresql_query:
+      login_host: "{{ freeradius_postgresql_host }}"
+      login_user: "{{ freeradius_postgresql_user }}"
+      login_password: "{{ freeradius_postgresql_password }}"
+      login_db: "{{ freeradius_postgresql_database }}"
+      ssl_mode: disable
+  tasks:
+    - name: FREERADIUS | Load RADIUS platform context
+      ansible.builtin.include_vars: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
+    - name: FREERADIUS | Buffer requests while PostgreSQL is stopped
+      block:
+        - name: FREERADIUS | Stop database fixture
+          containers.podman.podman_container:
+            name: freeradius-accounting-db
+            state: stopped
+          delegate_to: localhost
+          run_once: true
+
+        - name: FREERADIUS | Restart RADIUS without a database connection
+          become: true
+          become_user: root
+          ansible.builtin.service:
+            name: "{{ __freeradius_service }}"
+            state: restarted
+
+        - name: FREERADIUS | Acknowledge accounting during database outage
+          ansible.builtin.include_tasks: ../tasks/accounting.yml
+          vars:
+            __freeradius_test_acct_session: outage-session
+
+        - name: FREERADIUS | Verify PAP remains available without a session limit
+          ansible.builtin.import_tasks: ../tasks/authenticate.yml
+
+        - name: FREERADIUS | Enable session admission while the database is unavailable
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_simultaneous_use: 1
+
+        - name: FREERADIUS | Verify failed session lookup denies admission
+          ansible.builtin.import_tasks: ../tasks/authenticate.yml
+          vars:
+            __freeradius_expected_auth_response: Access-Reject
+
+        - name: FREERADIUS | Verify queued data survives another daemon restart
+          become: true
+          become_user: root
+          ansible.builtin.service:
+            name: "{{ __freeradius_service }}"
+            state: restarted
+
+      always:
+        - name: FREERADIUS | Restore database fixture
+          containers.podman.podman_container:
+            name: freeradius-accounting-db
+            state: started
+          delegate_to: localhost
+          run_once: true
+
+    - name: FREERADIUS | Wait for replayed accounting after database recovery
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT count(*) AS sessions FROM radacct
+          WHERE acctsessionid = 'outage-session' AND acctstoptime IS NULL
+      register: __freeradius_sql_recovered
+      until: __freeradius_sql_recovered is succeeded and __freeradius_sql_recovered.query_result[0].sessions == 1
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: FREERADIUS | Verify Simultaneous-Use rejects another login
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+      vars:
+        __freeradius_expected_auth_response: Access-Reject
+
+    - name: FREERADIUS | Close the recovered session
+      ansible.builtin.include_tasks: ../tasks/accounting.yml
+      vars:
+        __freeradius_test_acct_session: outage-session
+        __freeradius_test_acct_status: Stop
+
+    - name: FREERADIUS | Wait for SQL session closure
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT count(*) AS sessions FROM radacct
+          WHERE acctsessionid = 'outage-session' AND acctstoptime IS NULL
+      register: __freeradius_sql_closed
+      until: __freeradius_sql_closed.query_result[0].sessions == 0
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: FREERADIUS | Clear the attempt limit used by rejection probes
+      become: true
+      become_user: root
+      ansible.builtin.service:
+        name: "{{ __freeradius_service }}"
+        state: restarted
+
+    - name: FREERADIUS | Verify admission resumes after session closure
+      ansible.builtin.import_tasks: ../tasks/authenticate.yml
+
 - name: FREERADIUS | Exercise updates and service recovery
-  hosts: all
+  hosts: radius_servers
   gather_facts: true
   vars:
     freeradius_port: 11812
+    freeradius_accounting_port: 11813
+    freeradius_accounting_backend: detail
+    freeradius_postgresql_initialize_schema: false
     freeradius_clients:
       - name: replacement
         address: 127.0.0.1
@@ -19,6 +135,9 @@
       ansible.builtin.include_role:
         name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
         public: true
+
+    - name: FREERADIUS | Verify local accounting and write failures
+      ansible.builtin.import_tasks: ../tasks/accounting_detail.yml
 
     - name: FREERADIUS | Verify changed authentication and password revocation
       ansible.builtin.import_tasks: ../tasks/authenticate.yml
@@ -49,7 +168,7 @@
         __freeradius_rejected_password: molecule-password
 
 - name: FREERADIUS | Exercise empty access lists
-  hosts: all
+  hosts: radius_servers
   gather_facts: true
   vars:
     freeradius_clients: []

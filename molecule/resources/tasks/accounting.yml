@@ -1,0 +1,38 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/accounting.yml
+
+- name: FREERADIUS | Send accounting request without Message-Authenticator
+  ansible.builtin.command:
+    argv:
+      - radclient
+      - -x
+      - -r
+      - '3'
+      - -t
+      - '1'
+      - "127.0.0.1:{{ __freeradius_test_acct_port | default(1813) }}"
+      - acct
+      - "{{ __freeradius_test_acct_secret | default('molecule-radius-secret-2026') }}"
+    stdin: |
+      User-Name = "molecule"
+      Acct-Status-Type = {{ __freeradius_test_acct_status | default('Start') }}
+      Acct-Session-Id = "{{ __freeradius_test_acct_session }}"
+      NAS-Identifier = "molecule"
+      NAS-Port = 1
+      Acct-Session-Time = 60
+      Acct-Input-Octets = 1234
+      Acct-Input-Gigawords = 1
+      Acct-Output-Octets = 5678
+      Acct-Delay-Time = 10
+      {{ 'NAS-IP-Address = 127.0.0.1' if __freeradius_test_send_nas_address | default(true) else '' }}
+  changed_when: false
+  failed_when: false
+  register: __freeradius_accounting_response
+
+- name: FREERADIUS | Verify accounting response
+  ansible.builtin.assert:
+    that:
+      - (__freeradius_test_acct_response | default('Accounting-Response')) in __freeradius_accounting_response.stdout
+    fail_msg: "{{ __freeradius_accounting_response.stdout }} {{ __freeradius_accounting_response.stderr }}"
+    quiet: true

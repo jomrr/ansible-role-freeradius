@@ -2,8 +2,8 @@
 # role: freeradius
 # file: molecule/resources/playbooks/converge.yml
 
-- name: "Molecule | converge | freeradius"
-  hosts: all
+- name: FREERADIUS | Converge RADIUS servers with an external database fixture
+  hosts: radius_servers
   gather_facts: true
   roles:
     - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"

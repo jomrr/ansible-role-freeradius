@@ -1,0 +1,41 @@
+---
+# role: freeradius
+# file: tasks/postgresql_schema.yml
+
+- name: FREERADIUS | Install PostgreSQL schema management adapter
+  become: true
+  become_user: root
+  ansible.builtin.package:
+    name: python3-psycopg2
+    state: present
+
+- name: FREERADIUS | Inspect accounting schema
+  become: true
+  become_user: root
+  community.postgresql.postgresql_query:
+    login_host: "{{ freeradius_postgresql_host }}"
+    login_port: "{{ freeradius_postgresql_port }}"
+    login_db: "{{ freeradius_postgresql_database }}"
+    login_user: "{{ freeradius_postgresql_user }}"
+    login_password: "{{ freeradius_postgresql_password }}"
+    ssl_mode: "{{ freeradius_postgresql_ssl_mode }}"
+    ca_cert: "{{ freeradius_postgresql_ssl_root_cert or omit }}"
+    query: SELECT to_regclass('public.radacct') IS NOT NULL AS initialized
+  register: __freeradius_postgresql_schema
+  changed_when: false
+  no_log: true
+
+- name: FREERADIUS | Import distribution PostgreSQL schema
+  become: true
+  become_user: root
+  community.postgresql.postgresql_script:
+    login_host: "{{ freeradius_postgresql_host }}"
+    login_port: "{{ freeradius_postgresql_port }}"
+    login_db: "{{ freeradius_postgresql_database }}"
+    login_user: "{{ freeradius_postgresql_user }}"
+    login_password: "{{ freeradius_postgresql_password }}"
+    ssl_mode: "{{ freeradius_postgresql_ssl_mode }}"
+    ca_cert: "{{ freeradius_postgresql_ssl_root_cert or omit }}"
+    path: "{{ __freeradius_config_dir }}/mods-config/sql/main/postgresql/schema.sql"
+  when: not __freeradius_postgresql_schema.query_result[0].initialized
+  no_log: true

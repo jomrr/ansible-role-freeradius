@@ -3,7 +3,7 @@
 # file: molecule/resources/playbooks/verify.yml
 
 - name: FREERADIUS | Verify authentication service
-  hosts: all
+  hosts: radius_servers
   gather_facts: true
   tasks:
     - name: FREERADIUS | Load platform settings for verification
@@ -57,6 +57,9 @@
 
     - name: FREERADIUS | Verify attempt limiting and audit events
       ansible.builtin.import_tasks: ../tasks/security.yml
+
+    - name: FREERADIUS | Verify SQL accounting lifecycle
+      ansible.builtin.import_tasks: ../tasks/accounting_sql.yml
 
     - name: FREERADIUS | Verify unsafe client definitions are rejected
       ansible.builtin.include_tasks: ../tasks/invalid_client.yml

@@ -8,6 +8,44 @@ freeradius_listen_address: 127.0.0.1
 # UDP authentication port, from 1 to 65535.
 freeradius_port: 1812
 
+# Enable the UDP accounting listener for the configured clients.
+freeradius_accounting_enabled: false
+
+# UDP port for accounting requests on freeradius_listen_address.
+freeradius_accounting_port: 1813
+
+# Store detail records locally or drain them into PostgreSQL asynchronously.
+# Choices: detail, postgresql
+freeradius_accounting_backend: detail
+
+# PostgreSQL hostname required when the accounting backend is postgresql.
+# freeradius_postgresql_host: radius-db.example.net
+
+# PostgreSQL server port.
+freeradius_postgresql_port: 5432
+
+# Existing PostgreSQL database containing the FreeRADIUS schema.
+freeradius_postgresql_database: radius
+
+# PostgreSQL identity owning the accounting tables.
+freeradius_postgresql_user: radius
+
+# PostgreSQL password required when the accounting backend is postgresql.
+# freeradius_postgresql_password: "{{ vault_radius_postgresql_password }}"
+
+# TLS verification policy for the PostgreSQL connection.
+# Choices: disable, require, verify-ca, verify-full
+freeradius_postgresql_ssl_mode: verify-full
+
+# CA certificate path on the RADIUS host; empty uses the libpq default.
+freeradius_postgresql_ssl_root_cert: ''
+
+# Initialize the distribution FreeRADIUS schema in an existing empty database.
+freeradius_postgresql_initialize_schema: false
+
+# Maximum open SQL sessions per local user; zero disables admission checks.
+freeradius_simultaneous_use: 0
+
 # Authoritative RADIUS clients, all requiring Message-Authenticator.
 freeradius_clients: []
 # - name: access_switch

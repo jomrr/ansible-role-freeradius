@@ -19,12 +19,13 @@
       User-Password = "{{ __freeradius_test_password }}"
       Message-Authenticator = 0x00
   changed_when: false
+  failed_when: false
   register: __freeradius_accept
 
-- name: FREERADIUS | Verify Access-Accept
+- name: FREERADIUS | Verify admission response
   ansible.builtin.assert:
     that:
-      - "'Access-Accept' in __freeradius_accept.stdout"
+      - (__freeradius_expected_auth_response | default('Access-Accept')) in __freeradius_accept.stdout
     fail_msg: "{{ __freeradius_accept.stdout }} {{ __freeradius_accept.stderr }}"
     quiet: true
 

@@ -1,0 +1,87 @@
+---
+# role: freeradius
+# file: molecule/resources/tasks/accounting_sql.yml
+
+- name: FREERADIUS | Exercise SQL session lifecycle
+  module_defaults:
+    community.postgresql.postgresql_query:
+      login_host: "{{ freeradius_postgresql_host }}"
+      login_user: "{{ freeradius_postgresql_user }}"
+      login_password: "{{ freeradius_postgresql_password }}"
+      login_db: "{{ freeradius_postgresql_database }}"
+      ssl_mode: disable
+  block:
+    - name: FREERADIUS | Reset lifecycle fixture
+      community.postgresql.postgresql_query:
+        query: DELETE FROM radacct WHERE acctsessionid = 'sql-lifecycle'
+
+    - name: FREERADIUS | Send session start and retransmission
+      ansible.builtin.include_tasks: accounting.yml
+      loop: [Start, Start, Interim-Update]
+      loop_control:
+        loop_var: __freeradius_test_acct_status
+      vars:
+        __freeradius_test_acct_session: sql-lifecycle
+        __freeradius_test_send_nas_address: "{{ __freeradius_test_acct_status != 'Start' }}"
+
+    - name: FREERADIUS | Wait for one updated SQL session
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT count(*) AS sessions, max(acctinputoctets) AS received,
+                 max(acctoutputoctets) AS sent, max(acctsessiontime) AS duration,
+                 bool_and(acctstoptime IS NULL) AS active
+          FROM radacct WHERE acctsessionid = 'sql-lifecycle'
+      register: __freeradius_sql_session
+      until:
+        - __freeradius_sql_session.query_result[0].sessions == 1
+        - __freeradius_sql_session.query_result[0].received == 4294968530
+        - __freeradius_sql_session.query_result[0].sent == 5678
+        - __freeradius_sql_session.query_result[0].duration == 60
+        - __freeradius_sql_session.query_result[0].active
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: FREERADIUS | Send session stop
+      ansible.builtin.include_tasks: accounting.yml
+      vars:
+        __freeradius_test_acct_status: Stop
+        __freeradius_test_acct_session: sql-lifecycle
+
+    - name: FREERADIUS | Wait for closed SQL session
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT count(*) AS sessions FROM radacct
+          WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime IS NOT NULL
+      register: __freeradius_sql_stop
+      until: __freeradius_sql_stop.query_result[0].sessions == 1
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    - name: FREERADIUS | Acknowledge NAS restart events without open sessions
+      ansible.builtin.include_tasks: accounting.yml
+      loop: [Accounting-On, Accounting-Off]
+      loop_control:
+        loop_var: __freeradius_test_acct_status
+      vars:
+        __freeradius_test_acct_session: nas-restart
+
+    - name: FREERADIUS | Reject an invalid Accounting Request-Authenticator
+      ansible.builtin.include_tasks: accounting.yml
+      vars:
+        __freeradius_test_acct_session: invalid-authenticator
+        __freeradius_test_acct_secret: incorrect-client-secret-2026
+        __freeradius_test_acct_response: No reply from server
+
+    - name: FREERADIUS | Verify rejected packet did not reach SQL
+      community.postgresql.postgresql_query:
+        query: SELECT count(*) AS sessions FROM radacct WHERE acctsessionid = 'invalid-authenticator'
+      register: __freeradius_sql_invalid
+      changed_when: false
+
+    - name: FREERADIUS | Assert request authentication protected accounting
+      ansible.builtin.assert:
+        that:
+          - __freeradius_sql_invalid.query_result[0].sessions == 0
+        quiet: true

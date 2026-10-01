@@ -11,4 +11,6 @@ __freeradius_lib_dir: /usr/lib64/freeradius
 __freeradius_run_dir: /run/radiusd
 __freeradius_user: radiusd
 __freeradius_group: radiusd
+__freeradius_log_dir: /var/log/radius
+__freeradius_postgresql_package: freeradius-postgresql
 __freeradius_validate_config: /usr/local/libexec/freeradius-validate-config /usr/sbin/radiusd /etc/raddb %s
