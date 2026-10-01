@@ -11,9 +11,37 @@
       login_db: "{{ freeradius_postgresql_database }}"
       ssl_mode: disable
   block:
+    - name: FREERADIUS | Attempt runtime schema changes in rollback-only transactions
+      community.postgresql.postgresql_query:
+        query:
+          - "{{ __freeradius_ddl_probe }}"
+          - ROLLBACK
+      loop:
+        - ALTER TABLE public.radacct ADD COLUMN molecule_forbidden integer
+        - DROP TABLE public.radacct
+        - TRUNCATE public.radacct
+      loop_control:
+        loop_var: __freeradius_ddl_probe
+      register: __freeradius_ddl_results
+      changed_when: false
+      failed_when: false
+
+    - name: FREERADIUS | Verify runtime cannot alter drop or truncate accounting
+      ansible.builtin.assert:
+        that:
+          - __freeradius_ddl_result.msg | default('') is search('must be owner|permission denied')
+        quiet: true
+      loop: "{{ __freeradius_ddl_results.results }}"
+      loop_control:
+        loop_var: __freeradius_ddl_result
+        label: "{{ __freeradius_ddl_result.__freeradius_ddl_probe }}"
+
     - name: FREERADIUS | Reset lifecycle fixture
       community.postgresql.postgresql_query:
+        login_user: "{{ freeradius_postgresql_schema_user }}"
+        login_password: "{{ freeradius_postgresql_schema_password }}"
         query: DELETE FROM radacct WHERE acctsessionid = 'sql-lifecycle'
+      no_log: true
 
     - name: FREERADIUS | Send unsupported statuses before session start and retransmission
       ansible.builtin.include_tasks: accounting.yml

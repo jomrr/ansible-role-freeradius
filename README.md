@@ -32,8 +32,9 @@ UDP.
   checks; CRL or OCSP revocation and dynamic VLAN replies.
 - Optional accounting to local detail files or asynchronously to PostgreSQL,
   including PostgreSQL connection and TLS settings.
-- Optional PostgreSQL schema initialization and login limits based on recently
-  updated open SQL accounting sessions.
+- Optional PostgreSQL schema initialization with a separate owner and restricted
+  runtime grants.
+- Optional login limits based on recently updated open SQL accounting sessions.
 
 ### Not Managed
 
@@ -63,10 +64,12 @@ UDP.
 - EAP-TLS requires FreeRADIUS 3.2+, a PEM server certificate chain and key, and
   a client CA bundle readable by the service account. The switch or AP must
   support standard RADIUS tunnel attributes for dynamic VLAN assignment.
-- PostgreSQL accounting requires an existing database and login. Use the
-  distribution FreeRADIUS schema or let the role initialize it.
-- Optional schema initialization requires an empty database and CREATE
-  privileges for the configured database user.
+- PostgreSQL accounting requires an existing database and restricted runtime
+  login. Use the distribution FreeRADIUS schema or let the role initialize it.
+- Schema initialization requires separate owner credentials and an existing
+  database/public schema owned by that identity. The runtime login must have
+  CONNECT, no administrative or CREATE privileges, and no membership in the
+  owner role.
 
 ## Dependencies
 
@@ -314,7 +317,8 @@ freeradius_postgresql_database: radius
 
 Type: `str`. Required: `false`.
 
-Database identity; letters, digits, underscores or hyphens.
+Restricted runtime database login without ownership, CREATE or administrative
+privileges; letters, digits, underscores or hyphens.
 
 Default:
 
@@ -357,14 +361,29 @@ freeradius_postgresql_ssl_root_cert: ''
 
 Type: `bool`. Required: `false`.
 
-Import the packaged schema when public.radacct is absent; requires an existing
-empty database and CREATE rights.
+Import the packaged schema as a separate owner and grant runtime accounting
+privileges; requires existing database and logins.
 
 Default:
 
 ```yaml
 freeradius_postgresql_initialize_schema: false
 ```
+
+### `freeradius_postgresql_schema_user`
+
+Type: `str`. Required: `false`.
+
+Required when initializing the schema; existing database/schema owner distinct
+from freeradius_postgresql_user. Owns the imported tables and grants runtime
+privileges. Letters, digits, underscores or hyphens.
+
+### `freeradius_postgresql_schema_password`
+
+Type: `str`. Required: `false`.
+
+Required when initializing the schema; nonempty owner password distinct from the
+runtime password, used only by Ansible.
 
 ### `freeradius_simultaneous_use`
 
@@ -595,9 +614,16 @@ reapplied with the same inputs.
   durability on storage failure. Status types without a SQL query are skipped;
   database errors remain queued.
 - Enable freeradius_postgresql_initialize_schema to initialize an empty
-  database. While enabled, every role run requires database connectivity;
-  disable it after initialization if convergence must work during database
-  outages.
+  database. While enabled, every role run requires database connectivity and
+  freeradius_postgresql_schema_user/password; disable it after initialization if
+  convergence must work during database outages. The role grants public schema
+  USAGE, SELECT/INSERT/UPDATE on radacct and USAGE on radacct_radacctid_seq.
+  With initialization disabled, provision these permissions externally. Owner
+  credentials are not written to the RADIUS configuration.
+- Existing installations using an owner login need a restricted runtime login
+  and DBA-managed ownership/privilege migration before initialization. Rotate
+  previously deployed owner credentials, including those retained in
+  configuration backups. Runtime DML still permits accounting data changes.
 - freeradius_simultaneous_use applies to local PAP users and requires
   PostgreSQL; zero disables the limit. Only open sessions updated within
   freeradius_simultaneous_use_max_age seconds (default 900) count; stale records
@@ -725,7 +751,8 @@ Provision PKI files first; use policy OIDs under the assigned PEN.
 
 ### Buffered PostgreSQL accounting
 
-Use an empty database with CREATE rights for optional schema initialization.
+Pre-create radius as a restricted login and radius_owner as database owner.
+Provide separate Vault passwords for runtime and optional initialization.
 Configure NAS Interim-Updates every 300 seconds for the 900-second session
 freshness window.
 
@@ -738,9 +765,12 @@ freshness window.
       freeradius_accounting_enabled: true
       freeradius_accounting_backend: postgresql
       freeradius_postgresql_host: radius-db.example.net
+      freeradius_postgresql_user: radius
       freeradius_postgresql_password: "{{ vault_radius_postgresql_password }}"
       freeradius_postgresql_ssl_root_cert: /etc/ssl/certs/radius-db-ca.pem
       freeradius_postgresql_initialize_schema: true
+      freeradius_postgresql_schema_user: radius_owner
+      freeradius_postgresql_schema_password: "{{ vault_radius_schema_password }}"
       freeradius_simultaneous_use: 1
       freeradius_simultaneous_use_max_age: 900
       freeradius_clients:

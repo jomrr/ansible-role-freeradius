@@ -35,8 +35,10 @@ provisioner:
         freeradius_accounting_backend: "postgresql"
         freeradius_postgresql_host: "freeradius-accounting-db"
         freeradius_postgresql_database: "{{ inventory_hostname | replace('-', '_') }}"
-        freeradius_postgresql_user: "postgres"
-        freeradius_postgresql_password: "molecule-postgresql-secret-2026"
+        freeradius_postgresql_user: "radius"
+        freeradius_postgresql_password: "molecule-runtime-secret-2026"
+        freeradius_postgresql_schema_user: "radius_owner"
+        freeradius_postgresql_schema_password: "molecule-owner-secret-2026"
         freeradius_postgresql_ssl_mode: "disable"
         freeradius_postgresql_initialize_schema: true
         freeradius_eap_tls_enabled: true

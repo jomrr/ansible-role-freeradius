@@ -27,7 +27,7 @@ freeradius_postgresql_port: 5432
 # Existing PostgreSQL database containing the FreeRADIUS schema.
 freeradius_postgresql_database: radius
 
-# PostgreSQL identity owning the accounting tables.
+# Existing restricted PostgreSQL login used by the running RADIUS service.
 freeradius_postgresql_user: radius
 
 # PostgreSQL password required when the accounting backend is postgresql.
@@ -40,8 +40,14 @@ freeradius_postgresql_ssl_mode: verify-full
 # CA certificate path on the RADIUS host; empty uses the libpq default.
 freeradius_postgresql_ssl_root_cert: ''
 
-# Initialize the distribution FreeRADIUS schema in an existing empty database.
+# Initialize the distribution schema and runtime grants using separate owner credentials.
 freeradius_postgresql_initialize_schema: false
+
+# Existing database/schema owner required only for schema initialization and grants.
+# freeradius_postgresql_schema_user: radius_owner
+
+# Owner password used by Ansible only; never written to the RADIUS configuration.
+# freeradius_postgresql_schema_password: "{{ vault_radius_schema_password }}"
 
 # Maximum recent open SQL sessions per local PAP user; zero disables admission checks.
 freeradius_simultaneous_use: 0

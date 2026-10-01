@@ -52,6 +52,31 @@
   when: freeradius_accounting_backend == 'postgresql'
   no_log: true
 
+- name: FREERADIUS | Require separate PostgreSQL schema credentials
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_schema_user is defined
+      - freeradius_postgresql_schema_password is defined
+    quiet: true
+  when: freeradius_postgresql_initialize_schema
+
+- name: FREERADIUS | Validate PostgreSQL schema identity
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_schema_user is match('^[A-Za-z0-9_-]+\Z')
+      - freeradius_postgresql_schema_user != freeradius_postgresql_user
+    quiet: true
+  when: freeradius_postgresql_initialize_schema
+
+- name: FREERADIUS | Require a distinct nonempty PostgreSQL schema password
+  ansible.builtin.assert:
+    that:
+      - freeradius_postgresql_schema_password | length > 0
+      - freeradius_postgresql_schema_password != freeradius_postgresql_password
+    quiet: true
+  when: freeradius_postgresql_initialize_schema
+  no_log: true
+
 - name: FREERADIUS | Require EAP-TLS certificate inputs
   ansible.builtin.assert:
     that:

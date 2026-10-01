@@ -62,10 +62,32 @@
         port: 5432
         timeout: 60
 
-    - name: FREERADIUS | Create isolated database for each platform
+    - name: FREERADIUS | Create separate database owner and runtime fixture logins
+      community.postgresql.postgresql_user:
+        login_host: "{{ freeradius_postgresql_host }}"
+        login_user: postgres
+        login_password: molecule-postgresql-secret-2026
+        login_db: postgres
+        ssl_mode: disable
+        name: "{{ __freeradius_database_login.name }}"
+        password: "{{ __freeradius_database_login.password }}"
+        role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION,NOBYPASSRLS
+      loop:
+        - name: "{{ freeradius_postgresql_schema_user }}"
+          password: "{{ freeradius_postgresql_schema_password }}"
+        - name: "{{ freeradius_postgresql_user }}"
+          password: "{{ freeradius_postgresql_password }}"
+      loop_control:
+        loop_var: __freeradius_database_login
+        label: "{{ __freeradius_database_login.name }}"
+      run_once: true
+      no_log: true
+
+    - name: FREERADIUS | Create isolated owner-controlled database for each platform
       community.postgresql.postgresql_db:
         login_host: "{{ freeradius_postgresql_host }}"
-        login_user: "{{ freeradius_postgresql_user }}"
-        login_password: "{{ freeradius_postgresql_password }}"
+        login_user: postgres
+        login_password: molecule-postgresql-secret-2026
         ssl_mode: disable
         name: "{{ freeradius_postgresql_database }}"
+        owner: "{{ freeradius_postgresql_schema_user }}"

@@ -233,7 +233,8 @@ argument_specs:
       freeradius_postgresql_user:
         type: str
         default: radius
-        description: Database identity; letters, digits, underscores or hyphens.
+        description: Restricted runtime database login without ownership, CREATE or administrative
+          privileges; letters, digits, underscores or hyphens.
       freeradius_postgresql_password:
         type: str
         no_log: true
@@ -256,8 +257,18 @@ argument_specs:
       freeradius_postgresql_initialize_schema:
         type: bool
         default: false
-        description: Import the packaged schema when public.radacct is absent; requires
-          an existing empty database and CREATE rights.
+        description: Import the packaged schema as a separate owner and grant runtime accounting
+          privileges; requires existing database and logins.
+      freeradius_postgresql_schema_user:
+        type: str
+        description: Required when initializing the schema; existing database/schema owner
+          distinct from freeradius_postgresql_user. Owns the imported tables and grants
+          runtime privileges. Letters, digits, underscores or hyphens.
+      freeradius_postgresql_schema_password:
+        type: str
+        no_log: true
+        description: Required when initializing the schema; nonempty owner password distinct
+          from the runtime password, used only by Ansible.
       freeradius_simultaneous_use:
         type: int
         default: 0
