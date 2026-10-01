@@ -520,16 +520,16 @@ freeradius_eap_tls_vlan_policies: []
 ## Managed Files
 
 - `/etc/freeradius/3.0/radiusd.conf` Main configuration on Debian and Ubuntu.
-- `/etc/freeradius/3.0/ansible-users` Local PAP users on Debian and Ubuntu.
+- `/etc/freeradius/3.0/user` Local PAP users on Debian and Ubuntu.
 - `/etc/raddb/radiusd.conf` Main configuration on AlmaLinux, Fedora and
   openSUSE.
-- `/etc/raddb/ansible-users` Local PAP users on AlmaLinux, Fedora and openSUSE.
+- `/etc/raddb/user` Local PAP users on AlmaLinux, Fedora and openSUSE.
 - `/usr/local/libexec/freeradius-validate-config` Adapter for native validation
   of a main configuration candidate.
-- `/var/log/freeradius/ansible-accounting/` Accounting directory on Debian and
-  Ubuntu; FreeRADIUS writes and processes the detail files.
-- `/var/log/radius/ansible-accounting/` Accounting directory on AlmaLinux,
-  Fedora and openSUSE; FreeRADIUS writes and processes the detail files.
+- `/var/log/freeradius/accounting/` Accounting directory on Debian and Ubuntu;
+  FreeRADIUS writes and processes the detail files.
+- `/var/log/radius/accounting/` Accounting directory on AlmaLinux, Fedora and
+  openSUSE; FreeRADIUS writes and processes the detail files.
 
 ## Check Mode
 
@@ -575,10 +575,14 @@ reapplied with the same inputs.
 
 ## Operational Notes
 
-- Molecule checks RADIUS responses on the supported server platforms. Actual
-  VLAN, PPP profile, pool and filter enforcement requires a separate hardware
-  check on the deployed UniFi/MikroTik devices; it is not covered by these
-  tests.
+- When upgrading from ansible-accounting, stop FreeRADIUS and move existing
+  accounting files into accounting before applying the role. Remove the obsolete
+  ansible-users file after the role has installed user and restarted the
+  service.
+- [Molecule scenarios](molecule/README.md) check RADIUS responses on the
+  supported server platforms. Actual VLAN, PPP profile, pool and filter
+  enforcement requires a separate hardware check on the deployed UniFi/MikroTik
+  devices; it is not covered by these tests.
 - freeradius_authorization_enabled requires a matching user access grant and a
   client with services: [vpn]. Profiles are applied only after successful
   authentication and session checks. Disabled authorization preserves
@@ -605,9 +609,9 @@ reapplied with the same inputs.
   resets the counter. Counters reset on restart and are not shared between
   servers.
 - Enable freeradius_accounting_enabled for accounting, using UDP 1813 by
-  default. The detail backend writes to ansible-accounting/detail. The
-  postgresql backend forwards accounting asynchronously; database outages leave
-  PAP available unless a session limit is enabled.
+  default. The detail backend writes to accounting/detail. The postgresql
+  backend forwards accounting asynchronously; database outages leave PAP
+  available unless a session limit is enabled.
 - Configure external logrotate retention for the fixed detail file in detail
   mode. The role does not install a rotation policy. Existing detail-YYYYMMDD
   files are not renamed or removed; handle their retention separately.

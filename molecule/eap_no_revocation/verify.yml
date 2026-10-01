@@ -1,0 +1,40 @@
+---
+# role: freeradius
+# file: molecule/eap_no_revocation/verify.yml
+
+- name: FREERADIUS | Verify explicit revocation exception
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Verify the explicit revocation exception
+      become: true
+      become_user: root
+      # eapol_test can print binary TLS data; keep Ansible UTF-8 validation enabled.
+      ansible.builtin.shell: |
+        set -o pipefail
+        eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -p {{ __freeradius_eap_case.port | default(1812) | int }} \
+          -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
+          LC_ALL=C tr -cd '\11\12\15\40-\176'
+      args:
+        executable: /bin/bash
+      loop:
+        - profile: revoked
+          result: accept
+          vlan_hex: '343030'
+      loop_control:
+        loop_var: __freeradius_eap_case
+        label: "{{ __freeradius_eap_case.profile }}"
+      changed_when: false
+      failed_when: |-
+        (__freeradius_eap_result.rc == 0) != (__freeradius_eap_case.result == 'accept') or
+        ('SUCCESS' if __freeradius_eap_case.result == 'accept' else 'Access-Reject') not in __freeradius_eap_result.stdout or
+        (__freeradius_eap_case.result == 'accept' and (
+         __freeradius_eap_result.stdout is not search('Tunnel-Type[^\n]*\n +Value: 0000000d') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_case.vlan_hex))) or
+        (__freeradius_eap_case.result != 'accept' and
+         __freeradius_eap_result.stdout is search('Access-Accept|Tunnel-Private-Group-Id'))
+      register: __freeradius_eap_result
+  gather_subset:
+    - min

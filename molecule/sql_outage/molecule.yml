@@ -1,6 +1,6 @@
 ---
 # role: freeradius
-# file: molecule/dev/molecule.yml
+# file: molecule/sql_outage/molecule.yml
 
 dependency:
   name: "galaxy"
@@ -16,16 +16,13 @@ provisioner:
       interpreter_python: "auto_silent"
       callbacks_enabled: "ansible.builtin.default"
       callback_result_format: "yaml"
-      display_ok_hosts: false
-      display_skipped_hosts: false
-      show_task_path_on_failure: true
     ssh_connection:
       pipelining: true
   log: true
   playbooks:
     prepare: "../resources/playbooks/prepare.yml"
     converge: "../resources/playbooks/converge.yml"
-    verify: "../resources/playbooks/verify.yml"
+    verify: "verify.yml"
   inventory:
     group_vars:
       radius_servers:
@@ -39,7 +36,7 @@ provisioner:
         freeradius_postgresql_schema_password: "molecule-owner-secret-2026"
         freeradius_postgresql_ssl_mode: "disable"
         freeradius_postgresql_initialize_schema: true
-        freeradius_eap_tls_enabled: true
+        freeradius_eap_tls_enabled: false
         freeradius_eap_tls_certificate_file: "/etc/freeradius-molecule-pki/server.pem"
         freeradius_eap_tls_private_key_file: "/etc/freeradius-molecule-pki/server.key"
         freeradius_eap_tls_ca_file: "/etc/freeradius-molecule-pki/trust.pem"
@@ -153,6 +150,8 @@ provisioner:
           - profile: "revoked"
           - profile: "expired"
           - profile: "qualified"
+        freeradius_simultaneous_use: 0
+        freeradius_simultaneous_use_max_age: 600
 verifier:
   name: "ansible"
 scenario:
@@ -167,70 +166,10 @@ scenario:
     - "check"
     - "verify"
     - "destroy"
-  name: "dev"
+  name: "sql_outage"
 platforms:
-  - name: "almalinux-latest-freeradius"
-    image: "docker.io/jomrr/molecule-almalinux:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: "true"
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "radius_servers"
-    capabilities:
-      - "SYS_ADMIN"
-    security_opts:
-      - "label=disable"
-  - name: "debian-latest-freeradius"
-    image: "docker.io/jomrr/molecule-debian:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: "true"
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "radius_servers"
-    capabilities:
-      - "SYS_ADMIN"
-    security_opts:
-      - "label=disable"
-  - name: "fedora-latest-freeradius"
-    image: "docker.io/jomrr/molecule-fedora:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: "true"
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "radius_servers"
-    capabilities:
-      - "SYS_ADMIN"
-    security_opts:
-      - "label=disable"
-  - name: "opensuse-leap-latest-freeradius"
-    image: "docker.io/jomrr/molecule-opensuse-leap:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: "true"
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "radius_servers"
-    capabilities:
-      - "SYS_ADMIN"
-    security_opts:
-      - "label=disable"
-  - name: "opensuse-tumbleweed-latest-freeradius"
-    image: "docker.io/jomrr/molecule-opensuse-tumbleweed:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: "true"
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "radius_servers"
-    capabilities:
-      - "SYS_ADMIN"
-    security_opts:
-      - "label=disable"
-  - name: "ubuntu-latest-freeradius"
-    image: "docker.io/jomrr/molecule-ubuntu:latest"
+  - name: "freeradius-${MOLECULE_SCENARIO_NAME}"
+    image: "docker.io/${uns:-jomrr}/molecule-${img:-fedora}:${tag:-latest}"
     pre_build_image: true
     override_command: false
     systemd: "true"

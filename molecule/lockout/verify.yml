@@ -1,0 +1,307 @@
+---
+# role: freeradius
+# file: molecule/lockout/verify.yml
+
+- name: FREERADIUS | Verify per-user PAP failure limits
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Load platform settings for verification
+      ansible.builtin.include_vars:
+        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
+    - name: FREERADIUS | Verify successful PAP resets the failure counter
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: molecule / Access-Accept
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "wrong"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "wrong"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: molecule / Access-Accept
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "wrong"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "wrong"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: molecule / Access-Accept
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+
+    - name: FREERADIUS | Record journal cursor before parallel attempts
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - --no-pager
+          - -u
+          - "{{ __freeradius_service }}"
+          - -n
+          - '1'
+          - --show-cursor
+          - -o
+          - cat
+      changed_when: false
+      register: __freeradius_audit_cursor
+
+    - name: FREERADIUS | Send independent concurrent invalid PAP requests
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - 127.0.0.1:1812
+          - auth
+          - molecule-radius-secret-2026
+        stdin: |
+          User-Name = "molecule"
+          User-Password = "incorrect-password"
+          Message-Authenticator = 0x00
+          Service-Type = "Framed-User"
+          Framed-Protocol = "PPP"
+      loop:
+        - 0
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+      loop_control:
+        loop_var: __freeradius_attempt
+      changed_when: false
+      register: __freeradius_parallel
+      async: 15
+      poll: 0
+
+    - name: FREERADIUS | Check each concurrent PAP rejection
+      ansible.builtin.async_status:
+        jid: "{{ __freeradius_attempt.ansible_job_id }}"
+      loop: "{{ __freeradius_parallel.results }}"
+      loop_control:
+        loop_var: __freeradius_attempt
+        label: "{{ __freeradius_attempt.__freeradius_attempt }}"
+      register: __freeradius_completed
+      until: __freeradius_completed.finished
+      retries: 15
+      delay: 1
+      failed_when: __freeradius_completed.finished and 'Access-Reject' not in __freeradius_completed.stdout
+
+    - name: FREERADIUS | Verify locked, unrelated and unknown accounts
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: yescrypt / Access-Accept
+          request: |
+            User-Name = "yescrypt"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: unknown / Access-Reject
+          request: |
+            User-Name = "unknown"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+
+    - name: FREERADIUS | Read new authentication events
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - journalctl
+          - --no-pager
+          - -u
+          - "{{ __freeradius_service }}"
+          - -o
+          - cat
+          - "--after-cursor={{ __freeradius_audit_cursor.stdout_lines[-1] | regex_replace('^-- cursor: ', '') }}"
+      changed_when: false
+      register: __freeradius_audit
+
+    - name: FREERADIUS | Verify lockout isolation and credential-free audit events
+      ansible.builtin.assert:
+        that:
+          - __freeradius_audit.stdout | regex_findall('stage=rate_limit') | length == 6
+          - "'event=radius_auth result=Access-Accept' in __freeradius_audit.stdout"
+          - "'user_hex=6d6f6c6563756c65 client=molecule source=127.0.0.1' in __freeradius_audit.stdout"
+          - "'stage=unknown_user' in __freeradius_audit.stdout"
+          - "'molecule-password' not in __freeradius_audit.stdout"
+          - "'incorrect-password' not in __freeradius_audit.stdout"
+          - "'$6$' not in __freeradius_audit.stdout"
+          - "'$y$' not in __freeradius_audit.stdout"
+        quiet: true
+
+    - name: FREERADIUS | Verify PAP resumes when the lockout expires
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: molecule / Access-Accept
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+      until: "'Access-Accept' in __freeradius_response.stdout"
+      retries: 35
+      delay: 1
+  gather_subset:
+    - min

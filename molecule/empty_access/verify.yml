@@ -1,0 +1,37 @@
+---
+# role: freeradius
+# file: molecule/empty_access/verify.yml
+
+- name: FREERADIUS | Verify removed clients receive no response
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Send request from a removed client
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '1'
+          - 127.0.0.1:1812
+          - auth
+          - molecule-radius-secret-2026
+        stdin: |
+          User-Name = "molecule"
+          User-Password = "molecule-password"
+          Service-Type = Framed-User
+          Framed-Protocol = PPP
+          Message-Authenticator = 0x00
+      changed_when: false
+      failed_when: false
+      register: __freeradius_removed_client
+
+    - name: FREERADIUS | Verify removed client receives no response
+      ansible.builtin.assert:
+        that:
+          - "'No reply from server' in __freeradius_removed_client.stdout"
+        quiet: true
+  gather_subset:
+    - min

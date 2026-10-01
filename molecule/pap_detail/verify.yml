@@ -1,0 +1,312 @@
+---
+# role: freeradius
+# file: molecule/pap_detail/verify.yml
+
+- name: FREERADIUS | Verify credential-only PAP and local detail accounting
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Load platform settings for verification
+      ansible.builtin.include_vars:
+        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
+    - name: FREERADIUS | Verify disabled EAP-TLS denies certificate authentication
+      become: true
+      become_user: root
+      # eapol_test can print binary TLS data; keep Ansible UTF-8 validation enabled.
+      ansible.builtin.shell: |
+        set -o pipefail
+        eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -p {{ __freeradius_eap_case.port | default(1812) | int }} \
+          -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
+          LC_ALL=C tr -cd '\11\12\15\40-\176'
+      args:
+        executable: /bin/bash
+      loop:
+        - profile: staff
+          result: reject
+          port: 11812
+          secret: molecule-rotated-secret-2026
+      loop_control:
+        loop_var: __freeradius_eap_case
+        label: "{{ __freeradius_eap_case.profile }}"
+      changed_when: false
+      failed_when: |-
+        (__freeradius_eap_result.rc == 0) != (__freeradius_eap_case.result == 'accept') or
+        ('SUCCESS' if __freeradius_eap_case.result == 'accept' else 'Access-Reject') not in __freeradius_eap_result.stdout or
+        (__freeradius_eap_case.result == 'accept' and (
+         __freeradius_eap_result.stdout is not search('Tunnel-Type[^\n]*\n +Value: 0000000d') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_case.vlan_hex))) or
+        (__freeradius_eap_case.result != 'accept' and
+         __freeradius_eap_result.stdout is search('Access-Accept|Tunnel-Private-Group-Id'))
+      register: __freeradius_eap_result
+
+    - name: FREERADIUS | Send local accounting lifecycle
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+          - acct
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: detail-lifecycle / Start
+          request: |
+            User-Name = "molecule"
+            Acct-Status-Type = Start
+            Acct-Session-Id = "detail-lifecycle"
+            NAS-Identifier = "molecule"
+            NAS-Port = 1
+            Acct-Session-Time = 60
+            Acct-Input-Octets = 1234
+            Acct-Input-Gigawords = 1
+            Acct-Output-Octets = 5678
+            Acct-Delay-Time = 10
+            NAS-IP-Address = 127.0.0.1
+          response: Accounting-Response
+          port: 11813
+          secret: molecule-rotated-secret-2026
+        - name: detail-lifecycle / Interim-Update
+          request: |
+            User-Name = "molecule"
+            Acct-Status-Type = Interim-Update
+            Acct-Session-Id = "detail-lifecycle"
+            NAS-Identifier = "molecule"
+            NAS-Port = 1
+            Acct-Session-Time = 60
+            Acct-Input-Octets = 1234
+            Acct-Input-Gigawords = 1
+            Acct-Output-Octets = 5678
+            Acct-Delay-Time = 10
+            NAS-IP-Address = 127.0.0.1
+          response: Accounting-Response
+          port: 11813
+          secret: molecule-rotated-secret-2026
+        - name: detail-lifecycle / Stop
+          request: |
+            User-Name = "molecule"
+            Acct-Status-Type = Stop
+            Acct-Session-Id = "detail-lifecycle"
+            NAS-Identifier = "molecule"
+            NAS-Port = 1
+            Acct-Session-Time = 60
+            Acct-Input-Octets = 1234
+            Acct-Input-Gigawords = 1
+            Acct-Output-Octets = 5678
+            Acct-Delay-Time = 10
+            NAS-IP-Address = 127.0.0.1
+          response: Accounting-Response
+          port: 11813
+          secret: molecule-rotated-secret-2026
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
+
+    - name: FREERADIUS | Find local detail records
+      become: true
+      become_user: root
+      ansible.builtin.find:
+        paths: "{{ __freeradius_log_dir }}/accounting"
+        patterns: detail
+      register: __freeradius_detail_files
+
+    - name: FREERADIUS | Verify private accounting records exist
+      ansible.builtin.assert:
+        that:
+          - __freeradius_detail_files.matched == 1
+          - __freeradius_detail_files.files | map(attribute='mode') | unique | list == ['0600']
+          - __freeradius_detail_files.files | map(attribute='pw_name') | unique | list == [__freeradius_user]
+        quiet: true
+
+    - name: FREERADIUS | Read stored accounting records
+      become: true
+      become_user: root
+      ansible.builtin.slurp:
+        src: "{{ __freeradius_detail_files.files[0].path }}"
+      register: __freeradius_detail_records
+
+    - name: FREERADIUS | Verify stable session identifier and stored events
+      ansible.builtin.assert:
+        that:
+          - "'detail-lifecycle' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Start' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Interim-Update' in (__freeradius_detail_records.content | b64decode)"
+          - "'Acct-Status-Type = Stop' in (__freeradius_detail_records.content | b64decode)"
+          - |-
+            (__freeradius_detail_records.content | b64decode |
+             regex_findall('Acct-Unique-Session-Id = "?([a-f0-9]{32})') | unique | length) == 1
+        quiet: true
+
+    - name: FREERADIUS | Preserve detail data before injecting an open failure
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - mv
+          - "{{ __freeradius_detail_files.files[0].path }}"
+          - "{{ __freeradius_detail_files.files[0].path }}.saved"
+      changed_when: true
+
+    - name: FREERADIUS | Exercise a failed detail file open
+      block:
+        - name: FREERADIUS | Replace the detail file with a directory
+          become: true
+          become_user: root
+          ansible.builtin.file:
+            path: "{{ __freeradius_detail_files.files[0].path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: FREERADIUS | Close cached detail file descriptors
+          become: true
+          become_user: root
+          ansible.builtin.service:
+            name: "{{ __freeradius_service }}"
+            state: restarted
+
+        - name: FREERADIUS | Verify failed detail writes are not acknowledged
+          ansible.builtin.command:
+            argv:
+              - radclient
+              - -x
+              - -r
+              - '1'
+              - -t
+              - '3'
+              - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+              - acct
+              - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+            stdin: "{{ __freeradius_case.request }}"
+          loop:
+            - name: failed-write / Start
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Start
+                Acct-Session-Id = "failed-write"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+              response: No reply from server
+              port: 11813
+              secret: molecule-rotated-secret-2026
+          loop_control:
+            loop_var: __freeradius_case
+            label: "{{ __freeradius_case.name }}"
+          changed_when: false
+          register: __freeradius_response
+          failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
+      always:
+        - name: FREERADIUS | Remove the injected directory
+          become: true
+          become_user: root
+          ansible.builtin.file:
+            path: "{{ __freeradius_detail_files.files[0].path }}"
+            state: absent
+
+        - name: FREERADIUS | Restore original detail data
+          become: true
+          become_user: root
+          ansible.builtin.command:
+            argv:
+              - mv
+              - "{{ __freeradius_detail_files.files[0].path }}.saved"
+              - "{{ __freeradius_detail_files.files[0].path }}"
+          changed_when: true
+
+    - name: FREERADIUS | Verify retry succeeds after storage recovery
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+          - acct
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: failed-write / Start
+          request: |
+            User-Name = "molecule"
+            Acct-Status-Type = Start
+            Acct-Session-Id = "failed-write"
+            NAS-Identifier = "molecule"
+            NAS-Port = 1
+            Acct-Session-Time = 60
+            Acct-Input-Octets = 1234
+            Acct-Input-Gigawords = 1
+            Acct-Output-Octets = 5678
+            Acct-Delay-Time = 10
+            NAS-IP-Address = 127.0.0.1
+          response: Accounting-Response
+          port: 11813
+          secret: molecule-rotated-secret-2026
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
+
+    - name: FREERADIUS | Verify credential-only PAP after rotation and reject the old password
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: molecule / Access-Accept
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-rotated-password"
+            Message-Authenticator = 0x00
+          response: Access-Accept
+          reply: []
+          secret: molecule-rotated-secret-2026
+          port: 11812
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+          response: Access-Reject
+          reply: []
+          secret: molecule-rotated-secret-2026
+          port: 11812
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+  gather_subset:
+    - min

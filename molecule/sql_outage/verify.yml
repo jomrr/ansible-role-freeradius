@@ -1,0 +1,138 @@
+---
+# role: freeradius
+# file: molecule/sql_outage/verify.yml
+
+- name: FREERADIUS | Load RADIUS service settings
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Load platform settings for verification
+      ansible.builtin.include_vars:
+        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+  gather_subset:
+    - min
+
+- name: FREERADIUS | Coordinate database outage across the fixture and RADIUS hosts
+  hosts: radius_servers:accounting_database
+  gather_facts: false
+  strategy: linear
+  tasks:
+    - name: FREERADIUS | Buffer requests while PostgreSQL is stopped
+      block:
+        - name: FREERADIUS | Stop database fixture
+          containers.podman.podman_container:
+            name: "{{ inventory_hostname }}"
+            state: stopped
+          delegate_to: localhost
+          when: "'accounting_database' in group_names"
+
+        - name: FREERADIUS | Exercise RADIUS admission during the shared database outage
+          when: "'radius_servers' in group_names"
+          block:
+            - name: FREERADIUS | Restart RADIUS without a database connection
+              become: true
+              become_user: root
+              ansible.builtin.service:
+                name: "{{ __freeradius_service }}"
+                state: restarted
+
+            - name: FREERADIUS | Acknowledge accounting during database outage
+              ansible.builtin.command:
+                argv:
+                  - radclient
+                  - -x
+                  - -r
+                  - '1'
+                  - -t
+                  - '3'
+                  - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+                  - acct
+                  - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+                stdin: "{{ __freeradius_case.request }}"
+              loop:
+                - name: outage-session / Start
+                  request: |
+                    User-Name = "molecule"
+                    Acct-Status-Type = Start
+                    Acct-Session-Id = "outage-session"
+                    NAS-Identifier = "molecule"
+                    NAS-Port = 1
+                    Acct-Session-Time = 60
+                    Acct-Input-Octets = 1234
+                    Acct-Input-Gigawords = 1
+                    Acct-Output-Octets = 5678
+                    Acct-Delay-Time = 10
+                    NAS-IP-Address = 127.0.0.1
+                  response: Accounting-Response
+              loop_control:
+                loop_var: __freeradius_case
+                label: "{{ __freeradius_case.name }}"
+              changed_when: false
+              register: __freeradius_response
+              failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
+
+            - name: FREERADIUS | Verify PAP remains available without a session limit
+              ansible.builtin.command:
+                argv:
+                  - radclient
+                  - -x
+                  - -r
+                  - '1'
+                  - -t
+                  - '3'
+                  - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+                  - auth
+                  - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+                stdin: "{{ __freeradius_case.request }}"
+              loop:
+                - name: molecule / Access-Accept
+                  request: |
+                    User-Name = "molecule"
+                    User-Password = "molecule-password"
+                    Message-Authenticator = 0x00
+                    Service-Type = "Framed-User"
+                    Framed-Protocol = "PPP"
+                  response: Access-Accept
+                  reply:
+                    - Mikrotik-Group = "vpn-staff"
+                    - Framed-Pool = "vpn-pool"
+                    - Filter-Id = "vpn-filter"
+                    - Session-Timeout = 3600
+                    - Idle-Timeout = 600
+              loop_control:
+                loop_var: __freeradius_case
+                label: "{{ __freeradius_case.name }}"
+              changed_when: false
+              register: __freeradius_response
+              failed_when: |-
+                __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+                (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+                (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+                 search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+      always:
+        - name: FREERADIUS | Restore database fixture
+          containers.podman.podman_container:
+            name: "{{ inventory_hostname }}"
+            state: started
+          delegate_to: localhost
+          when: "'accounting_database' in group_names"
+
+- name: FREERADIUS | Verify replay and session admission after database recovery
+  hosts: radius_servers
+  gather_facts: false
+  module_defaults:
+    community.postgresql.postgresql_query:
+      login_host: "{{ freeradius_postgresql_host }}"
+      login_user: "{{ freeradius_postgresql_user }}"
+      login_password: "{{ freeradius_postgresql_password }}"
+      login_db: "{{ freeradius_postgresql_database }}"
+      ssl_mode: disable
+  tasks:
+    - name: FREERADIUS | Wait for replayed accounting after database recovery
+      community.postgresql.postgresql_query:
+        query: SELECT count(*) AS sessions FROM radacct WHERE acctsessionid = 'outage-session' AND acctstoptime IS NULL
+      register: __freeradius_sql_recovered
+      until: __freeradius_sql_recovered is succeeded and __freeradius_sql_recovered.query_result[0].sessions == 1
+      retries: 30
+      delay: 2
+      changed_when: false

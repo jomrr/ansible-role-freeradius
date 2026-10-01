@@ -7,3 +7,5 @@
   gather_facts: true
   roles:
     - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+  gather_subset:
+    - min

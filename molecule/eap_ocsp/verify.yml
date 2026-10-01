@@ -1,0 +1,142 @@
+---
+# role: freeradius
+# file: molecule/eap_ocsp/verify.yml
+
+- name: FREERADIUS | Verify OCSP decisions and responder outage
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Verify disabled MAC admission rejects known devices
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: aabbccddeeff / Access-Reject
+          request: |
+            User-Name = "aabbccddeeff"
+            User-Password = "aabbccddeeff"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aa:bb:cc:dd:ee:ff"
+          response: Access-Reject
+          reply: []
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+
+    - name: FREERADIUS | Serve three signed OCSP responses from the test CA
+      become: true
+      become_user: root
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - ocsp
+          - -index
+          - ca/index
+          - -port
+          - '8888'
+          - -rsigner
+          - ca/cert.pem
+          - -rkey
+          - ca/key.pem
+          - -CA
+          - ca/cert.pem
+          - -nrequest
+          - '3'
+        chdir: /etc/freeradius-molecule-pki
+      async: 90
+      poll: 0
+      changed_when: true
+      register: __freeradius_ocsp_fixture
+
+    - name: FREERADIUS | Verify OCSP and the changed VLAN without PAP users
+      become: true
+      become_user: root
+      # eapol_test can print binary TLS data; keep Ansible UTF-8 validation enabled.
+      ansible.builtin.shell: |
+        set -o pipefail
+        eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -p {{ __freeradius_eap_case.port | default(1812) | int }} \
+          -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
+          LC_ALL=C tr -cd '\11\12\15\40-\176'
+      args:
+        executable: /bin/bash
+      loop:
+        - profile: staff
+          result: accept
+          vlan_hex: '343030'
+        - profile: revoked
+          result: reject
+      loop_control:
+        loop_var: __freeradius_eap_case
+        label: "{{ __freeradius_eap_case.profile }}"
+      changed_when: false
+      failed_when: |-
+        (__freeradius_eap_result.rc == 0) != (__freeradius_eap_case.result == 'accept') or
+        ('SUCCESS' if __freeradius_eap_case.result == 'accept' else 'Access-Reject') not in __freeradius_eap_result.stdout or
+        (__freeradius_eap_case.result == 'accept' and (
+         __freeradius_eap_result.stdout is not search('Tunnel-Type[^\n]*\n +Value: 0000000d') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_case.vlan_hex))) or
+        (__freeradius_eap_case.result != 'accept' and
+         __freeradius_eap_result.stdout is search('Access-Accept|Tunnel-Private-Group-Id'))
+      register: __freeradius_eap_result
+
+    - name: FREERADIUS | Wait for OCSP fixture to finish its three requests
+      become: true
+      become_user: root
+      ansible.builtin.async_status:
+        jid: "{{ __freeradius_ocsp_fixture.ansible_job_id }}"
+      register: __freeradius_ocsp_finished
+      until: __freeradius_ocsp_finished.finished
+      retries: 10
+      delay: 1
+
+    - name: FREERADIUS | Verify OCSP outage denies a valid certificate
+      become: true
+      become_user: root
+      # eapol_test can print binary TLS data; keep Ansible UTF-8 validation enabled.
+      ansible.builtin.shell: |
+        set -o pipefail
+        eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -p {{ __freeradius_eap_case.port | default(1812) | int }} \
+          -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
+          LC_ALL=C tr -cd '\11\12\15\40-\176'
+      args:
+        executable: /bin/bash
+      loop:
+        - profile: staff
+          result: reject
+      loop_control:
+        loop_var: __freeradius_eap_case
+        label: "{{ __freeradius_eap_case.profile }}"
+      changed_when: false
+      failed_when: |-
+        (__freeradius_eap_result.rc == 0) != (__freeradius_eap_case.result == 'accept') or
+        ('SUCCESS' if __freeradius_eap_case.result == 'accept' else 'Access-Reject') not in __freeradius_eap_result.stdout or
+        (__freeradius_eap_case.result == 'accept' and (
+         __freeradius_eap_result.stdout is not search('Tunnel-Type[^\n]*\n +Value: 0000000d') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_case.vlan_hex))) or
+        (__freeradius_eap_case.result != 'accept' and
+         __freeradius_eap_result.stdout is search('Access-Accept|Tunnel-Private-Group-Id'))
+      register: __freeradius_eap_result
+  gather_subset:
+    - min

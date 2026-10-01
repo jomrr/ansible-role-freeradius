@@ -1,0 +1,37 @@
+---
+# role: freeradius
+# file: molecule/authorization/side_effect.yml
+
+- name: FREERADIUS | Exercise access profile updates and device enrollment
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_postgresql_initialize_schema: false
+    freeradius_access_profiles:
+      - name: vpn_staff
+        kind: vpn
+        mikrotik_group: vpn-updated
+        framed_pool: updated-pool
+        filter_id: updated-filter
+        session_timeout: 1800
+        idle_timeout: 300
+      - name: printers
+        kind: mab
+        vlan_id: 310
+      - name: quarantine
+        kind: mab
+        vlan_id: 998
+    freeradius_mab_devices:
+      - mac: aa:bb:cc:dd:ee:ff
+        access:
+          - client: molecule
+            profile: printers
+      - mac: 11:22:33:44:55:66
+        access:
+          - client: molecule
+            profile: printers
+  tasks: []
+  roles:
+    - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+  gather_subset:
+    - min

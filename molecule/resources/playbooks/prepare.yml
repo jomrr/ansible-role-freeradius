@@ -55,6 +55,7 @@
       ansible.builtin.script:
         cmd: "../files/create-eap-fixtures {{ __freeradius_group }}"
         creates: /etc/freeradius-molecule-pki/ready
+      when: freeradius_eap_tls_enabled
 
     - name: FREERADIUS | Prepare reusable certificate test supplicants
       become: true
@@ -73,50 +74,59 @@
               client_cert="/etc/freeradius-molecule-pki/{{ __freeradius_eap_fixture.profile }}.pem"
               private_key="/etc/freeradius-molecule-pki/client.key"
           }
-      loop: "{{ __freeradius_eap_baseline_cases }}"
+      loop: "{{ __freeradius_eap_fixtures }}"
       loop_control:
         loop_var: __freeradius_eap_fixture
         label: "{{ __freeradius_eap_fixture.profile }}"
+      when: freeradius_eap_tls_enabled
+  gather_subset:
+    - min
 
 - name: FREERADIUS | Prepare shared PostgreSQL logins through one RADIUS host
   hosts: radius_servers[0]
   gather_facts: false
   tasks:
-    - name: FREERADIUS | Wait for database fixture
-      ansible.builtin.wait_for:
-        host: "{{ freeradius_postgresql_host }}"
-        port: 5432
-        timeout: 60
+    - name: FREERADIUS | Prepare PostgreSQL fixture for SQL accounting
+      when: freeradius_accounting_enabled and freeradius_accounting_backend == 'postgresql'
+      block:
+        - name: FREERADIUS | Wait for database fixture
+          ansible.builtin.wait_for:
+            host: "{{ freeradius_postgresql_host }}"
+            port: 5432
+            timeout: 60
 
-    - name: FREERADIUS | Create separate database owner and runtime fixture logins
-      community.postgresql.postgresql_user:
-        login_host: "{{ freeradius_postgresql_host }}"
-        login_user: postgres
-        login_password: molecule-postgresql-secret-2026
-        login_db: postgres
-        ssl_mode: disable
-        name: "{{ __freeradius_database_login.name }}"
-        password: "{{ __freeradius_database_login.password }}"
-        role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION,NOBYPASSRLS
-      loop:
-        - name: "{{ freeradius_postgresql_schema_user }}"
-          password: "{{ freeradius_postgresql_schema_password }}"
-        - name: "{{ freeradius_postgresql_user }}"
-          password: "{{ freeradius_postgresql_password }}"
-      loop_control:
-        loop_var: __freeradius_database_login
-        label: "{{ __freeradius_database_login.name }}"
-      no_log: true
+        - name: FREERADIUS | Create separate database owner and runtime fixture logins
+          community.postgresql.postgresql_user:
+            login_host: "{{ freeradius_postgresql_host }}"
+            login_user: postgres
+            login_password: molecule-postgresql-secret-2026
+            login_db: postgres
+            ssl_mode: disable
+            name: "{{ __freeradius_database_login.name }}"
+            password: "{{ __freeradius_database_login.password }}"
+            role_attr_flags: LOGIN,NOSUPERUSER,NOCREATEDB,NOCREATEROLE,NOREPLICATION,NOBYPASSRLS
+          loop:
+            - name: "{{ freeradius_postgresql_schema_user }}"
+              password: "{{ freeradius_postgresql_schema_password }}"
+            - name: "{{ freeradius_postgresql_user }}"
+              password: "{{ freeradius_postgresql_password }}"
+          loop_control:
+            loop_var: __freeradius_database_login
+            label: "{{ __freeradius_database_login.name }}"
+          no_log: true
 
 - name: FREERADIUS | Prepare isolated databases for all RADIUS platforms
   hosts: radius_servers
   gather_facts: false
   tasks:
-    - name: FREERADIUS | Create isolated owner-controlled database for each platform
-      community.postgresql.postgresql_db:
-        login_host: "{{ freeradius_postgresql_host }}"
-        login_user: postgres
-        login_password: molecule-postgresql-secret-2026
-        ssl_mode: disable
-        name: "{{ freeradius_postgresql_database }}"
-        owner: "{{ freeradius_postgresql_schema_user }}"
+    - name: FREERADIUS | Prepare PostgreSQL fixture for SQL accounting
+      when: freeradius_accounting_enabled and freeradius_accounting_backend == 'postgresql'
+      block:
+        - name: FREERADIUS | Create isolated owner-controlled database for each platform
+          community.postgresql.postgresql_db:
+            login_host: "{{ freeradius_postgresql_host }}"
+            login_user: postgres
+            login_password: molecule-postgresql-secret-2026
+            ssl_mode: disable
+            name: "{{ freeradius_postgresql_database }}"
+            owner: "{{ freeradius_postgresql_schema_user }}"

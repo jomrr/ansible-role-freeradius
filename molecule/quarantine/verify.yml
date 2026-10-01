@@ -1,0 +1,47 @@
+---
+# role: freeradius
+# file: molecule/quarantine/verify.yml
+
+- name: FREERADIUS | Verify quarantine with no local users or device grants
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Verify empty device list uses updated quarantine without PAP users
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: aabbccddeeff / Access-Accept
+          request: |
+            User-Name = "aabbccddeeff"
+            User-Password = "aabbccddeeff"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aa:bb:cc:dd:ee:ff"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "998"
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+  gather_subset:
+    - min

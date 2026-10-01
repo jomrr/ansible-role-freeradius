@@ -1,0 +1,17 @@
+---
+# role: freeradius
+# file: molecule/empty_access/side_effect.yml
+
+- name: FREERADIUS | Exercise empty access lists
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_postgresql_initialize_schema: false
+    freeradius_mab_devices: []
+    freeradius_clients: []
+    freeradius_users: []
+  roles:
+    - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+  tasks: []
+  gather_subset:
+    - min

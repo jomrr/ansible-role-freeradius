@@ -1,6 +1,6 @@
 ---
 # role: freeradius
-# file: molecule/default/molecule.yml
+# file: molecule/eap_ocsp/molecule.yml
 
 dependency:
   name: "galaxy"
@@ -22,12 +22,12 @@ provisioner:
   playbooks:
     prepare: "../resources/playbooks/prepare.yml"
     converge: "../resources/playbooks/converge.yml"
-    verify: "../resources/playbooks/verify.yml"
+    verify: "verify.yml"
   inventory:
     group_vars:
       radius_servers:
-        freeradius_accounting_enabled: true
-        freeradius_accounting_backend: "postgresql"
+        freeradius_accounting_enabled: false
+        freeradius_accounting_backend: "detail"
         freeradius_postgresql_host: "freeradius-${MOLECULE_SCENARIO_NAME}-db"
         freeradius_postgresql_database: "{{ inventory_hostname | replace('-', '_') }}"
         freeradius_postgresql_user: "radius"
@@ -35,7 +35,7 @@ provisioner:
         freeradius_postgresql_schema_user: "radius_owner"
         freeradius_postgresql_schema_password: "molecule-owner-secret-2026"
         freeradius_postgresql_ssl_mode: "disable"
-        freeradius_postgresql_initialize_schema: true
+        freeradius_postgresql_initialize_schema: false
         freeradius_eap_tls_enabled: true
         freeradius_eap_tls_certificate_file: "/etc/freeradius-molecule-pki/server.pem"
         freeradius_eap_tls_private_key_file: "/etc/freeradius-molecule-pki/server.key"
@@ -44,13 +44,11 @@ provisioner:
         freeradius_eap_tls_ca_path: "/etc/freeradius-molecule-pki/trust"
         freeradius_eap_tls_vlan_policies:
           - oid: "1.3.6.1.4.1.32473.1"
-            vlan_id: 100
-          - oid: "1.3.6.1.4.1.32473.2"
-            vlan_id: 200
+            vlan_id: 400
         freeradius_failure_limit: 3
         freeradius_failure_window: 30
         freeradius_authorization_enabled: true
-        freeradius_mab_enabled: true
+        freeradius_mab_enabled: false
         freeradius_mab_quarantine_profile: "quarantine"
         freeradius_access_profiles:
           - name: "vpn_staff"
@@ -99,43 +97,7 @@ provisioner:
             secret: "molecule-unassigned-secret-2026"
             services:
               - "vpn"
-        freeradius_users:
-          - name: "molecule"
-            password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "yescrypt"
-            password: "$$y$$j9T$$4t5m3NETzIbg3nUDVlDFk0$$.vWIX7aKYcYjuS2ZRRp3LYuGpPxdXCfSqMHftxJFEK9"
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "pbkdf2"
-            password_attribute: "PBKDF2-Password"
-            password: "$$PBKDF2$$HMACSHA2+256:10000:bW9sZWN1bGUtcmFkaXVzLXRlc3Q=$$EVuwQXzj4cnInQKgJV0ebDNOsB9bH8cPn93w1zV4Mc8="
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "ssha512"
-            password_attribute: "SSHA2-512-Password"
-            password: "UvtgGlsFQrNfyW1K6piCcunSJk9xmlSnC7/mtLymenxSdcVlhG2vcSUbcAZF/4THoFcaqdq7QumhEZc3Aj3NBG1vbGVjdWxlLXJhZGl1cy10ZXN0"
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "cleartext"
-            password_attribute: "Cleartext-Password"
-            password: "molecule-password"
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "nthash"
-            password_attribute: "NT-Password"
-            password: "296c92fcc9aaaa38289733d6d46c931a"
-            access:
-              - client: "molecule"
-                profile: "vpn_staff"
-          - name: "no_profile"
-            password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
+        freeradius_users: []
         __freeradius_eap_fixtures:
           - profile: "staff"
           - profile: "guest"
@@ -150,6 +112,8 @@ provisioner:
           - profile: "revoked"
           - profile: "expired"
           - profile: "qualified"
+        freeradius_eap_tls_revocation: "ocsp"
+        freeradius_eap_tls_ocsp_url: "http://127.0.0.1:8888/"
 verifier:
   name: "ansible"
 scenario:
@@ -164,7 +128,7 @@ scenario:
     - "check"
     - "verify"
     - "destroy"
-  name: "default"
+  name: "eap_ocsp"
 platforms:
   - name: "freeradius-${MOLECULE_SCENARIO_NAME}"
     image: "docker.io/${uns:-jomrr}/molecule-${img:-fedora}:${tag:-latest}"
@@ -178,12 +142,3 @@ platforms:
       - "SYS_ADMIN"
     security_opts:
       - "label=disable"
-  - name: "freeradius-${MOLECULE_SCENARIO_NAME}-db"
-    image: "docker.io/library/postgres:16-alpine"
-    pre_build_image: true
-    override_command: false
-    network: "freeradius-${MOLECULE_SCENARIO_NAME}"
-    groups:
-      - "accounting_database"
-    env:
-      POSTGRES_PASSWORD: "molecule-postgresql-secret-2026"

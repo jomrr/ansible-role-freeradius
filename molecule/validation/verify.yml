@@ -1,0 +1,141 @@
+---
+# role: freeradius
+# file: molecule/validation/verify.yml
+
+- name: FREERADIUS | Verify rejected role inputs
+  hosts: radius_servers
+  gather_facts: true
+  tasks:
+    - name: FREERADIUS | Reject unrestricted_network
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_clients:
+              - name: everywhere
+                address: 0.0.0.0/0
+                secret: molecule-radius-secret-2026
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Validate client network syntax'
+            quiet: true
+
+    - name: FREERADIUS | Reject repeated_secret
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_clients:
+              - name: first
+                address: 192.0.2.1
+                secret: molecule-radius-secret-2026
+              - name: second
+                address: 192.0.2.2
+                secret: molecule-radius-secret-2026
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Require a distinct shared secret for each client'
+            quiet: true
+
+    - name: FREERADIUS | Reject invalid_profile_vlan
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_access_profiles:
+              - name: invalid
+                kind: mab
+                vlan_id: 4095
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Validate access profile constraints'
+            quiet: true
+
+    - name: FREERADIUS | Reject unknown_profile_reference
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_mab_devices:
+              - mac: aa:bb:cc:dd:ee:ff
+                access:
+                  - client: molecule
+                    profile: nonexistent
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Validate MAB grant references'
+            quiet: true
+
+    - name: FREERADIUS | Reject repeated_client_grant
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_mab_devices:
+              - mac: aa:bb:cc:dd:ee:ff
+                access:
+                  - client: molecule
+                    profile: printers
+                  - client: molecule
+                    profile: quarantine
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Require unique client grants per identity'
+            quiet: true
+
+    - name: FREERADIUS | Reject repeated_normalized_mac
+      block:
+        - name: FREERADIUS | Validate unsafe definition before changing the server
+          ansible.builtin.include_role:
+            name: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+          vars:
+            freeradius_mab_devices:
+              - mac: aa:bb:cc:dd:ee:ff
+              - mac: AABBCCDDEEFF
+
+        - name: FREERADIUS | Fail if the invalid definition was accepted
+          ansible.builtin.fail:
+            msg: Invalid definition accepted.
+      rescue:
+        - name: FREERADIUS | Check the expected role constraint rejected the definition
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'FREERADIUS | Validate authorization prerequisites'
+            quiet: true
+  gather_subset:
+    - min

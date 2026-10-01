@@ -2,41 +2,472 @@
 # role: freeradius
 # file: molecule/resources/playbooks/verify.yml
 
-- name: FREERADIUS | Verify authentication service
+- name: FREERADIUS | Verify PAP, VPN, MAB, EAP-TLS and SQL accounting
   hosts: radius_servers
   gather_facts: true
   tasks:
-    - name: FREERADIUS | Verify service state and credential permissions
-      ansible.builtin.import_tasks: ../tasks/service.yml
+    - name: FREERADIUS | Load platform settings for verification
+      ansible.builtin.include_vars:
+        file: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}/vars/{{ ansible_facts.os_family }}.yml"
+
+    - name: FREERADIUS | Read service state
+      ansible.builtin.service_facts: null
+
+    - name: FREERADIUS | Verify service is running and enabled
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[__freeradius_service + '.service'].state == 'running'
+          - ansible_facts.services[__freeradius_service + '.service'].status == 'enabled'
+        quiet: true
+
+    - name: FREERADIUS | Inspect credential file permissions
+      become: true
+      become_user: root
+      ansible.builtin.stat:
+        path: "{{ __freeradius_config_dir }}/{{ __freeradius_file }}"
+      loop:
+        - radiusd.conf
+        - user
+      loop_control:
+        loop_var: __freeradius_file
+      register: __freeradius_permissions
+
+    - name: FREERADIUS | Verify credentials are protected
+      ansible.builtin.assert:
+        that:
+          - __freeradius_permission.stat.mode == '0640'
+          - __freeradius_permission.stat.pw_name == 'root'
+          - __freeradius_permission.stat.gr_name == __freeradius_group
+        quiet: true
+      loop: "{{ __freeradius_permissions.results }}"
+      loop_control:
+        loop_var: __freeradius_permission
+        label: "{{ __freeradius_permission.stat.path }}"
 
     - name: FREERADIUS | Verify EAP-TLS certificate authorization and VLAN mapping
-      ansible.builtin.import_tasks: ../tasks/eap_tls.yml
-      vars:
-        __freeradius_eap_cases: "{{ __freeradius_eap_baseline_cases }}"
+      become: true
+      become_user: root
+      # eapol_test can print binary TLS data; keep Ansible UTF-8 validation enabled.
+      ansible.builtin.shell: |
+        set -o pipefail
+        eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -p {{ __freeradius_eap_case.port | default(1812) | int }} \
+          -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
+          LC_ALL=C tr -cd '\11\12\15\40-\176'
+      args:
+        executable: /bin/bash
+      loop:
+        - profile: staff
+          result: accept
+          vlan_hex: '313030'
+        - profile: guest
+          result: accept
+          vlan_hex: '323030'
+          phase1: tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0
+        - profile: missing_policy
+          result: reject
+        - profile: unknown_policy
+          result: reject
+        - profile: multiple_policy
+          result: reject
+        - profile: missing_eku
+          result: reject
+        - profile: wrong_eku
+          result: reject
+        - profile: wrong_issuer
+          result: reject
+        - profile: untrusted
+          result: reject
+        - profile: revoked
+          result: reject
+        - profile: expired
+          result: reject
+        - profile: qualified
+          result: reject
+      loop_control:
+        loop_var: __freeradius_eap_case
+        label: "{{ __freeradius_eap_case.profile }}"
+      changed_when: false
+      failed_when: |-
+        (__freeradius_eap_result.rc == 0) != (__freeradius_eap_case.result == 'accept') or
+        ('SUCCESS' if __freeradius_eap_case.result == 'accept' else 'Access-Reject') not in __freeradius_eap_result.stdout or
+        (__freeradius_eap_case.result == 'accept' and (
+         __freeradius_eap_result.stdout is not search('Tunnel-Type[^\n]*\n +Value: 0000000d') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Medium-Type[^\n]*\n +Value: 00000006') or
+         __freeradius_eap_result.stdout is not search('Tunnel-Private-Group-Id[^\n]*\n +Value: ' ~ __freeradius_eap_case.vlan_hex))) or
+        (__freeradius_eap_case.result != 'accept' and
+         __freeradius_eap_result.stdout is search('Access-Accept|Tunnel-Private-Group-Id'))
+      register: __freeradius_eap_result
 
-    - name: FREERADIUS | Verify credential formats and NAS access profiles
-      ansible.builtin.import_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_auth_cases: "{{ __freeradius_hash_cases + __freeradius_access_matrix }}"
-        __freeradius_hash_cases:
-          - {username: molecule, password: molecule-password, response: Access-Accept}
-          - {username: molecule, password: incorrect-password, response: Access-Reject}
-          - {username: yescrypt, password: molecule-password, response: Access-Accept}
-          - {username: yescrypt, password: incorrect-password, response: Access-Reject}
-          - {username: pbkdf2, password: molecule-password, response: Access-Accept}
-          - {username: pbkdf2, password: incorrect-password, response: Access-Reject}
-          - {username: ssha512, password: molecule-password, response: Access-Accept}
-          - {username: ssha512, password: incorrect-password, response: Access-Reject}
-          - {username: cleartext, password: molecule-password, response: Access-Accept}
-          - {username: cleartext, password: incorrect-password, response: Access-Reject}
-          - {username: nthash, password: molecule-password, response: Access-Accept}
-          - {username: nthash, password: incorrect-password, response: Access-Reject}
+    - name: FREERADIUS | Verify PAP hash formats and VPN or MAB authorization
+      ansible.builtin.command:
+        argv:
+          - radclient
+          - -x
+          - -r
+          - '1'
+          - -t
+          - '3'
+          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - auth
+          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+        stdin: "{{ __freeradius_case.request }}"
+      loop:
+        - name: molecule / Access-Reject
+          request: |
+            User-Name = "molecule"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: yescrypt / Access-Accept
+          request: |
+            User-Name = "yescrypt"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: yescrypt / Access-Reject
+          request: |
+            User-Name = "yescrypt"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: pbkdf2 / Access-Accept
+          request: |
+            User-Name = "pbkdf2"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: pbkdf2 / Access-Reject
+          request: |
+            User-Name = "pbkdf2"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: ssha512 / Access-Accept
+          request: |
+            User-Name = "ssha512"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: ssha512 / Access-Reject
+          request: |
+            User-Name = "ssha512"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: cleartext / Access-Accept
+          request: |
+            User-Name = "cleartext"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: cleartext / Access-Reject
+          request: |
+            User-Name = "cleartext"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: nthash / Access-Accept
+          request: |
+            User-Name = "nthash"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: nthash / Access-Reject
+          request: |
+            User-Name = "nthash"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: vpn_profile
+          request: |
+            User-Name = "molecule"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Accept
+          reply:
+            - Mikrotik-Group = "vpn-staff"
+            - Framed-Pool = "vpn-pool"
+            - Filter-Id = "vpn-filter"
+            - Session-Timeout = 3600
+            - Idle-Timeout = 600
+        - name: vpn_without_grant
+          request: |
+            User-Name = "no_profile"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: vpn_wrong_nas
+          request: |
+            User-Name = "yescrypt"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            Framed-Protocol = "PPP"
+            Packet-Src-IP-Address = "127.0.0.3"
+          response: Access-Reject
+          reply: []
+          secret: molecule-unassigned-secret-2026
+        - name: vpn_wrong_service
+          request: |
+            User-Name = "cleartext"
+            User-Password = "molecule-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Login-User"
+            Framed-Protocol = "PPP"
+          response: Access-Reject
+          reply: []
+        - name: unifi_printer
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "aa:bb:cc:dd:ee:ff"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aabb.ccdd.eeff"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "300"
+            - Session-Timeout = 600
+            - Idle-Timeout = 120
+        - name: unifi_wifi
+          request: |
+            User-Name = "aa-bb-cc-dd-ee-ff"
+            User-Password = "AABB.CCDD.EEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Wireless-802.11"
+            Calling-Station-Id = "AA:BB:CC:DD:EE:FF"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "300"
+            - Session-Timeout = 600
+            - Idle-Timeout = 120
+        - name: mikrotik_printer
+          request: |
+            User-Name = "aabb.ccdd.eeff"
+            User-Password = "AA-BB-CC-DD-EE-FF"
+            Message-Authenticator = 0x00
+            Service-Type = "Framed-User"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aa:bb:cc:dd:ee:ff"
+            Packet-Src-IP-Address = "127.0.0.2"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "300"
+            - Session-Timeout = 600
+            - Idle-Timeout = 120
+          secret: molecule-mikrotik-secret-2026
+        - name: unknown_mac
+          request: |
+            User-Name = "112233445566"
+            User-Password = "11:22:33:44:55:66"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "11-22-33-44-55-66"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "999"
+            - Session-Timeout = 120
+        - name: mac_without_nas_grant
+          request: |
+            User-Name = "1234567890ab"
+            User-Password = "12:34:56:78:90:ab"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "12:34:56:78:90:ab"
+          response: Access-Accept
+          reply:
+            - Tunnel-Type:0 = VLAN
+            - Tunnel-Medium-Type:0 = IEEE-802
+            - Tunnel-Private-Group-Id:0 = "999"
+            - Session-Timeout = 120
+        - name: incorrect_mac_password
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "112233445566"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aabb.ccdd.eeff"
+          response: Access-Reject
+          reply: []
+        - name: malformed_mac_password
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aabb.ccdd.eeff"
+          response: Access-Reject
+          reply: []
+        - name: incorrect_unknown_mac_password
+          request: |
+            User-Name = "112233445566"
+            User-Password = "incorrect-password"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "11-22-33-44-55-66"
+          response: Access-Reject
+          reply: []
+        - name: missing_station_mac
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+          response: Access-Reject
+          reply: []
+        - name: mismatched_station_mac
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "112233445566"
+          response: Access-Reject
+          reply: []
+        - name: malformed_mac
+          request: |
+            User-Name = "not-a-mac"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aabb.ccdd.eeff"
+          response: Access-Reject
+          reply: []
+        - name: incorrect_port_type
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Virtual"
+            Calling-Station-Id = "AABBCCDDEEFF"
+          response: Access-Reject
+          reply: []
+        - name: incorrect_service_type
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Login-User"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "AABBCCDDEEFF"
+          response: Access-Reject
+          reply: []
+        - name: client_without_mab_service
+          request: |
+            User-Name = "AABBCCDDEEFF"
+            User-Password = "AABBCCDDEEFF"
+            Message-Authenticator = 0x00
+            Service-Type = "Call-Check"
+            NAS-Port-Type = "Ethernet"
+            Calling-Station-Id = "aabb.ccdd.eeff"
+            Packet-Src-IP-Address = "127.0.0.3"
+          response: Access-Reject
+          reply: []
+          secret: molecule-unassigned-secret-2026
+      loop_control:
+        loop_var: __freeradius_case
+        label: "{{ __freeradius_case.name }}"
+      changed_when: false
+      register: __freeradius_response
+      failed_when: |-
+        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
+        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
+        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
 
     - name: FREERADIUS | Read admission audit events
       become: true
       become_user: root
       ansible.builtin.command:
-        argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -o, cat]
+        argv:
+          - journalctl
+          - --no-pager
+          - -u
+          - "{{ __freeradius_service }}"
+          - -o
+          - cat
       changed_when: false
       register: __freeradius_access_audit
 
@@ -48,98 +479,6 @@
           - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
           - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
           - "'molecule-password' not in __freeradius_access_audit.stdout"
-        quiet: true
-
-    - name: FREERADIUS | Exercise resets after successful authentication
-      ansible.builtin.command:
-        argv: [radclient, -x, -r, '3', -t, '3', -p, '1', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
-        stdin: |
-          {% for __freeradius_password in ['molecule-password', 'wrong', 'wrong', 'molecule-password', 'wrong', 'wrong', 'molecule-password'] %}
-          User-Name = "molecule"
-          User-Password = "{{ __freeradius_password }}"
-          Service-Type = Framed-User
-          Framed-Protocol = PPP
-          Message-Authenticator = 0x00
-
-          {% endfor %}
-      changed_when: false
-      failed_when: >-
-        __freeradius_reset.stdout | regex_findall('Received Access-Accept') | length != 3 or
-        __freeradius_reset.stdout | regex_findall('Received Access-Reject') | length != 4
-      register: __freeradius_reset
-
-    - name: FREERADIUS | Record journal cursor before parallel attempts
-      become: true
-      become_user: root
-      ansible.builtin.command:
-        argv: [journalctl, --no-pager, -u, "{{ __freeradius_service }}", -n, '1', --show-cursor, -o, cat]
-      changed_when: false
-      register: __freeradius_audit_cursor
-
-    - name: FREERADIUS | Send parallel invalid authentication requests
-      ansible.builtin.command:
-        argv: [radclient, -x, -r, '3', -t, '3', -p, '8', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
-        stdin: |
-          {% for __freeradius_attempt in range(8) %}
-          User-Name = "molecule"
-          User-Password = "incorrect-password"
-          Service-Type = Framed-User
-          Framed-Protocol = PPP
-          Message-Authenticator = 0x00
-
-          {% endfor %}
-      changed_when: false
-      failed_when: __freeradius_parallel.stdout | regex_findall('Received Access-Reject') | length != 8
-      register: __freeradius_parallel
-      # Use UTC for command.end and the controller's later deadline calculation.
-      environment:
-        TZ: UTC
-
-    - name: FREERADIUS | Check locked and unrelated accounts
-      ansible.builtin.command:
-        argv: [radclient, -x, -r, '3', -t, '3', '127.0.0.1:1812', auth, molecule-radius-secret-2026]
-        stdin: |
-          {% for __freeradius_name in ['molecule', 'yescrypt', 'unknown'] %}
-          User-Name = "{{ __freeradius_name }}"
-          User-Password = "molecule-password"
-          Service-Type = Framed-User
-          Framed-Protocol = PPP
-          Message-Authenticator = 0x00
-
-          {% endfor %}
-      changed_when: false
-      failed_when: >-
-        __freeradius_locked.stdout | regex_findall('Received Access-Accept') | length != 1 or
-        __freeradius_locked.stdout | regex_findall('Received Access-Reject') | length != 2
-      register: __freeradius_locked
-
-    - name: FREERADIUS | Read new authentication events
-      become: true
-      become_user: root
-      ansible.builtin.command:
-        argv:
-          - journalctl
-          - --no-pager
-          - -u
-          - "{{ __freeradius_service }}"
-          - -o
-          - cat
-          - "--after-cursor={{ __freeradius_audit_cursor.stdout_lines[-1] | regex_replace('^-- cursor: ', '') }}"
-      changed_when: false
-      register: __freeradius_audit
-
-    - name: FREERADIUS | Verify lockout isolation and credential-free audit events
-      ansible.builtin.assert:
-        that:
-          - __freeradius_audit.stdout | regex_findall('stage=rate_limit') | length == 6
-          - "'event=radius_auth result=Access-Accept' in __freeradius_audit.stdout"
-          - "'user_hex=6d6f6c6563756c65 client=molecule source=127.0.0.1' in __freeradius_audit.stdout"
-          - "'stage=unknown_user' in __freeradius_audit.stdout"
-          - "'molecule-password' not in __freeradius_audit.stdout"
-          - "'incorrect-password' not in __freeradius_audit.stdout"
-          - "'$6$' not in __freeradius_audit.stdout"
-          - "'$y$' not in __freeradius_audit.stdout"
-        fail_msg: "{{ __freeradius_parallel.stdout }} {{ __freeradius_locked.stdout }} {{ __freeradius_audit.stdout }}"
         quiet: true
 
     - name: FREERADIUS | Exercise SQL session lifecycle
@@ -175,19 +514,102 @@
           no_log: true
 
         - name: FREERADIUS | Send unsupported statuses before session start and retransmission
-          ansible.builtin.import_tasks: ../tasks/accounting.yml
-          vars:
-            # 2024-03-31 00:59:30/01:00:30 UTC straddle Berlin's CET/CEST transition.
-            __freeradius_accounting_cases:
-              - {session: sql-lifecycle, status: Failed, send_nas_address: true, timestamp: 1711846770}
-              - {session: sql-lifecycle, status: Tunnel-Start, send_nas_address: true, timestamp: 1711846770}
-              - {session: sql-lifecycle, status: Start, send_nas_address: false, timestamp: 1711846770}
-              - {session: sql-lifecycle, status: Start, send_nas_address: false, timestamp: 1711846770}
-              - {session: sql-lifecycle, status: Interim-Update, send_nas_address: true, timestamp: 1711846830}
+          ansible.builtin.command:
+            argv:
+              - radclient
+              - -x
+              - -r
+              - '1'
+              - -t
+              - '3'
+              - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+              - acct
+              - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+            stdin: "{{ __freeradius_case.request }}"
+          loop:
+            - name: sql-lifecycle / Failed
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Failed
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+                Event-Timestamp = 1711846770
+              response: Accounting-Response
+            - name: sql-lifecycle / Tunnel-Start
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Tunnel-Start
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+                Event-Timestamp = 1711846770
+              response: Accounting-Response
+            - name: sql-lifecycle / Start
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Start
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                Event-Timestamp = 1711846770
+              response: Accounting-Response
+            - name: sql-lifecycle / Start
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Start
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                Event-Timestamp = 1711846770
+              response: Accounting-Response
+            - name: sql-lifecycle / Interim-Update
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Interim-Update
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+                Event-Timestamp = 1711846830
+              response: Accounting-Response
+          loop_control:
+            loop_var: __freeradius_case
+            label: "{{ __freeradius_case.name }}"
+          changed_when: false
+          register: __freeradius_response
+          failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
 
         - name: FREERADIUS | Wait for one updated SQL session
           community.postgresql.postgresql_query:
-            query: >-
+            query: |-
               SELECT count(*) AS sessions, max(acctinputoctets) AS received,
                      max(acctoutputoctets) AS sent, max(acctsessiontime) AS duration,
                      extract(epoch FROM max(acctstarttime))::bigint AS started,
@@ -208,16 +630,44 @@
           changed_when: false
 
         - name: FREERADIUS | Send session stop
-          ansible.builtin.import_tasks: ../tasks/accounting.yml
-          vars:
-            __freeradius_accounting_cases:
-              - {session: sql-lifecycle, status: Stop, timestamp: 1711846830}
+          ansible.builtin.command:
+            argv:
+              - radclient
+              - -x
+              - -r
+              - '1'
+              - -t
+              - '3'
+              - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+              - acct
+              - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+            stdin: "{{ __freeradius_case.request }}"
+          loop:
+            - name: sql-lifecycle / Stop
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Stop
+                Acct-Session-Id = "sql-lifecycle"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+                Event-Timestamp = 1711846830
+              response: Accounting-Response
+          loop_control:
+            loop_var: __freeradius_case
+            label: "{{ __freeradius_case.name }}"
+          changed_when: false
+          register: __freeradius_response
+          failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
 
         - name: FREERADIUS | Wait for closed SQL session
           community.postgresql.postgresql_query:
-            query: >-
-              SELECT count(*) AS sessions FROM radacct
-              WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime = to_timestamp(1711846830)
+            query: SELECT count(*) AS sessions FROM radacct WHERE acctsessionid = 'sql-lifecycle' AND acctstoptime = to_timestamp(1711846830)
           register: __freeradius_sql_stop
           until: __freeradius_sql_stop.query_result[0].sessions == 1
           retries: 30
@@ -225,12 +675,68 @@
           changed_when: false
 
         - name: FREERADIUS | Verify accounting cases for the current configuration
-          ansible.builtin.import_tasks: ../tasks/accounting.yml
-          vars:
-            __freeradius_accounting_cases:
-              - {session: nas-restart, status: Accounting-On}
-              - {session: nas-restart, status: Accounting-Off}
-              - {session: invalid-authenticator, secret: incorrect-client-secret-2026, response: No reply from server}
+          ansible.builtin.command:
+            argv:
+              - radclient
+              - -x
+              - -r
+              - '1'
+              - -t
+              - '3'
+              - "127.0.0.1:{{ __freeradius_case.port | default(1813) }}"
+              - acct
+              - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
+            stdin: "{{ __freeradius_case.request }}"
+          loop:
+            - name: nas-restart / Accounting-On
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Accounting-On
+                Acct-Session-Id = "nas-restart"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+              response: Accounting-Response
+            - name: nas-restart / Accounting-Off
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Accounting-Off
+                Acct-Session-Id = "nas-restart"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+              response: Accounting-Response
+            - name: invalid-authenticator / Start
+              request: |
+                User-Name = "molecule"
+                Acct-Status-Type = Start
+                Acct-Session-Id = "invalid-authenticator"
+                NAS-Identifier = "molecule"
+                NAS-Port = 1
+                Acct-Session-Time = 60
+                Acct-Input-Octets = 1234
+                Acct-Input-Gigawords = 1
+                Acct-Output-Octets = 5678
+                Acct-Delay-Time = 10
+                NAS-IP-Address = 127.0.0.1
+              response: No reply from server
+              secret: incorrect-client-secret-2026
+          loop_control:
+            loop_var: __freeradius_case
+            label: "{{ __freeradius_case.name }}"
+          changed_when: false
+          register: __freeradius_response
+          failed_when: __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr)
 
         - name: FREERADIUS | Verify rejected packet did not reach SQL
           community.postgresql.postgresql_query:
@@ -243,62 +749,5 @@
             that:
               - __freeradius_sql_invalid.query_result[0].sessions == 0
             quiet: true
-
-- name: FREERADIUS | Verify platform-independent configuration constraints
-  hosts: radius_servers[0]
-  gather_facts: false
-  tasks:
-    - name: FREERADIUS | Verify unsafe client definitions are rejected
-      ansible.builtin.include_tasks: ../tasks/invalid_client.yml
-      loop:
-        - name: unrestricted_network
-          clients:
-            - {name: everywhere, address: 0.0.0.0/0, secret: molecule-radius-secret-2026}
-          failed_task: FREERADIUS | Validate client network syntax
-        - name: repeated_secret
-          clients:
-            - {name: first, address: 192.0.2.1, secret: molecule-radius-secret-2026}
-            - {name: second, address: 192.0.2.2, secret: molecule-radius-secret-2026}
-          failed_task: FREERADIUS | Require a distinct shared secret for each client
-        - name: invalid_profile_vlan
-          profiles:
-            - {name: invalid, kind: mab, vlan_id: 4095}
-          failed_task: FREERADIUS | Validate access profile constraints
-        - name: unknown_profile_reference
-          devices:
-            - mac: aa:bb:cc:dd:ee:ff
-              access:
-                - {client: molecule, profile: nonexistent}
-          failed_task: FREERADIUS | Validate MAB grant references
-        - name: repeated_client_grant
-          devices:
-            - mac: aa:bb:cc:dd:ee:ff
-              access:
-                - {client: molecule, profile: printers}
-                - {client: molecule, profile: quarantine}
-          failed_task: FREERADIUS | Require unique client grants per identity
-        - name: repeated_normalized_mac
-          devices:
-            - {mac: 'aa:bb:cc:dd:ee:ff'}
-            - {mac: AABBCCDDEEFF}
-          failed_task: FREERADIUS | Validate authorization prerequisites
-      loop_control:
-        loop_var: __freeradius_invalid_client
-        label: "{{ __freeradius_invalid_client.name }}"
-
-- name: FREERADIUS | Verify lockout expiry after independent accounting and constraint checks
-  hosts: radius_servers
-  gather_facts: false
-  tasks:
-    - name: FREERADIUS | Wait only for the remaining attempt window
-      ansible.builtin.wait_for:
-        timeout: >-
-          {{ [0, (freeradius_failure_window + 1 -
-             (now(utc=true) - (__freeradius_parallel.end | to_datetime('%Y-%m-%d %H:%M:%S.%f'))).total_seconds())
-             | round(0, 'ceil') | int] | max }}
-
-    - name: FREERADIUS | Verify authentication after expiry
-      ansible.builtin.import_tasks: ../tasks/authenticate.yml
-      vars:
-        __freeradius_auth_cases:
-          - {password: molecule-password}
+  gather_subset:
+    - min

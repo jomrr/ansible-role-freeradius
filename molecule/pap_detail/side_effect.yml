@@ -1,0 +1,29 @@
+---
+# role: freeradius
+# file: molecule/pap_detail/side_effect.yml
+
+- name: FREERADIUS | Exercise updates and service recovery
+  hosts: radius_servers
+  gather_facts: true
+  vars:
+    freeradius_authorization_enabled: false
+    freeradius_mab_enabled: false
+    freeradius_access_profiles: []
+    freeradius_mab_devices: []
+    freeradius_port: 11812
+    freeradius_accounting_port: 11813
+    freeradius_accounting_backend: detail
+    freeradius_postgresql_initialize_schema: false
+    freeradius_clients:
+      - name: replacement
+        address: 127.0.0.1
+        secret: molecule-rotated-secret-2026
+    freeradius_users:
+      - name: molecule
+        password: $6$moleculerotated$Nn3rS7eZJh/1TvQv/GmfSn5EBpo5ZTHTpKmGsNFmXly6vw1YEwXoizeHQNBgpBfI71ASB0bj6mCJh5/Xl0Dt7.
+    freeradius_eap_tls_enabled: false
+  tasks: []
+  roles:
+    - role: "{{ lookup('ansible.builtin.env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+  gather_subset:
+    - min

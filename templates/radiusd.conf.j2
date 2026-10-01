@@ -155,7 +155,7 @@ policy {
 {% endif %}
 modules {
     files {
-        filename = {{ __freeradius_config_dir }}/ansible-users
+        filename = {{ __freeradius_config_dir }}/user
     }
 {% if freeradius_eap_tls_enabled %}
     eap {
@@ -206,7 +206,7 @@ modules {
     expr {
     }
     detail {
-        filename = "{{ __freeradius_log_dir }}/ansible-accounting/{{ 'detail' if freeradius_accounting_backend == 'detail' else 'detail-%Y%m%d' }}"
+        filename = "{{ __freeradius_log_dir }}/accounting/{{ 'detail' if freeradius_accounting_backend == 'detail' else 'detail-%Y%m%d' }}"
         permissions = 0600
         locking = yes
         dates_as_integer = yes
@@ -424,7 +424,7 @@ server default {
 server buffered-sql {
     listen {
         type = detail
-        filename = "{{ __freeradius_log_dir }}/ansible-accounting/detail-*"
+        filename = "{{ __freeradius_log_dir }}/accounting/detail-*"
         load_factor = 10
         poll_interval = 1
         retry_interval = 5
