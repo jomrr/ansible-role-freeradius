@@ -59,7 +59,7 @@
           vars:
             freeradius_access_profiles:
               - name: invalid
-                kind: mab
+                service: mab
                 vlan_id: 4095
 
         - name: FREERADIUS | Fail if the invalid definition was accepted

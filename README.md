@@ -658,7 +658,7 @@ Create vpn-staff, vpn-pool and vpn-filter on the gateway.
           services: [vpn]
       freeradius_access_profiles:
         - name: vpn_staff
-          kind: vpn
+          service: vpn
           mikrotik_group: vpn-staff
           framed_pool: vpn-pool
           filter_id: vpn-filter
@@ -701,8 +701,8 @@ approved profile to request reauthentication when its timer expires.
           services: [mab]
           mab_service_type: Framed-User
       freeradius_access_profiles:
-        - {name: printers, kind: mab, vlan_id: 300}
-        - {name: quarantine, kind: mab, vlan_id: 999, session_timeout: 300}
+        - {name: printers, service: mab, vlan_id: 300}
+        - {name: quarantine, service: mab, vlan_id: 999, session_timeout: 300}
       freeradius_mab_devices:
         - mac: '00:11:22:33:44:55'
           access:

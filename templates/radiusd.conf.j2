@@ -54,7 +54,7 @@ policy {
 {% for __freeradius_profile in freeradius_access_profiles %}
         if (&control:Tmp-String-2 == "{{ __freeradius_profile.name }}") {
             update reply {
-{% if __freeradius_profile.kind == 'mab' %}
+{% if __freeradius_profile.service == 'mab' %}
                 Tunnel-Type := VLAN
                 Tunnel-Medium-Type := IEEE-802
                 Tunnel-Private-Group-Id := "{{ __freeradius_profile.vlan_id }}"

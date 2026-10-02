@@ -81,14 +81,14 @@ freeradius_authorization_enabled: false
 # Named VPN and MAB reply profiles referencing existing NAS resources.
 freeradius_access_profiles: []
 # - name: vpn_staff
-#   kind: vpn
+#   service: vpn
 #   mikrotik_group: vpn-staff
 #   framed_pool: vpn-pool
 #   filter_id: vpn-filter
 #   session_timeout: 3600
 #   reauthenticate: false
 # - name: printers
-#   kind: mab
+#   service: mab
 #   vlan_id: 100
 
 # Enable MAC admission on explicitly permitted NAS clients; requires authorization.

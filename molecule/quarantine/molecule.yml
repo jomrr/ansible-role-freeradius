@@ -51,17 +51,17 @@ provisioner:
         freeradius_mab_quarantine_profile: "quarantine"
         freeradius_access_profiles:
           - name: "vpn_staff"
-            kind: "vpn"
+            service: "vpn"
             mikrotik_group: "vpn-updated"
             framed_pool: "updated-pool"
             filter_id: "updated-filter"
             session_timeout: 1800
             idle_timeout: 300
           - name: "printers"
-            kind: "mab"
+            service: "mab"
             vlan_id: 310
           - name: "quarantine"
-            kind: "mab"
+            service: "mab"
             vlan_id: 998
         freeradius_mab_devices: []
         freeradius_clients:
