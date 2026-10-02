@@ -87,6 +87,7 @@ provisioner:
         freeradius_users: []
         __freeradius_eap_fixtures:
           - profile: "staff"
+            identity: "administrator"
           - profile: "rsa_key_transport"
             certificate: "staff"
             ciphers: "AES128-GCM-SHA256"
@@ -100,6 +101,7 @@ provisioner:
           - profile: "wrong_issuer"
           - profile: "untrusted"
           - profile: "revoked"
+            identity: "administrator"
           - profile: "expired"
           - profile: "qualified"
   log: true

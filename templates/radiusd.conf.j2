@@ -266,7 +266,7 @@ modules {
         filename = syslog
         syslog_facility = authpriv
         syslog_severity = info
-        format = "event=radius_auth result=%{reply:Packet-Type} user_hex=%{hex:&User-Name} client=%{client:shortname} source=%{Packet-Src-IP-Address} stage=%{control:Tmp-String-0} profile=%{control:Tmp-String-2} mac=%{control:Tmp-String-4}"
+        format = "event=radius_auth result=%{reply:Packet-Type} user_hex=%{hex:&User-Name} client=%{client:shortname} source=%{Packet-Src-IP-Address} stage=%{control:Tmp-String-0} profile=%{control:Tmp-String-2} mac=%{control:Tmp-String-4} cert_serial=%{TLS-Client-Cert-Serial} cert_subject_hex=%{hex:&TLS-Client-Cert-Subject}"
     }
 }
 

@@ -139,6 +139,7 @@ provisioner:
             password: "$$6$$moleculefixture$$7iP0CMRfRDetFtaURogLajuthlIvPcj.LrPKVwuhXgBKSjto.1e/rWwXJdk0ANZDn5dB1AjUMBdXigv9CTTnX0"
         __freeradius_eap_fixtures:
           - profile: "staff"
+            identity: "administrator"
           - profile: "rsa_key_transport"
             certificate: "staff"
             ciphers: "AES128-GCM-SHA256"
@@ -152,6 +153,7 @@ provisioner:
           - profile: "wrong_issuer"
           - profile: "untrusted"
           - profile: "revoked"
+            identity: "administrator"
           - profile: "expired"
           - profile: "qualified"
   log: true

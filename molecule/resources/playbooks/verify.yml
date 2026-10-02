@@ -482,13 +482,21 @@
       changed_when: false
       register: __freeradius_access_audit
 
-    - name: FREERADIUS | Verify VPN and MAC audit classification
+    - name: FREERADIUS | Verify VPN, MAC and EAP-TLS audit identity
       ansible.builtin.assert:
         that:
           - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
           - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
           - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
           - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
+          - >-
+            __freeradius_access_audit.stdout is search(
+            'event=radius_auth result=Access-Accept user_hex=61646d696e6973747261746f72 '
+            ~ '[^\n]*stage=eap_tls [^\n]*cert_serial=[0-9a-f]+ cert_subject_hex=2f434e3d6d6f6c6563756c65(\s|$)')
+          - >-
+            __freeradius_access_audit.stdout is search(
+            'event=radius_auth result=Access-Reject user_hex=61646d696e6973747261746f72 '
+            ~ '[^\n]*stage=eap_tls [^\n]*cert_serial=[0-9a-f]+ cert_subject_hex=2f434e3d6d6f6c6563756c65(\s|$)')
           - "'molecule-password' not in __freeradius_access_audit.stdout"
         quiet: true
 

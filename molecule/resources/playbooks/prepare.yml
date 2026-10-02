@@ -69,7 +69,7 @@
               eap=TLS
               phase1="{{ __freeradius_eap_fixture.phase1 | default('tls_disable_tlsv1_3=1') }}"
               openssl_ciphers="{{ __freeradius_eap_fixture.ciphers | default('ECDHE-RSA-AES256-GCM-SHA384') }}"
-              identity="molecule"
+              identity="{{ __freeradius_eap_fixture.identity | default('molecule') }}"
               ca_cert="/etc/freeradius-molecule-pki/ca/cert.pem"
               domain_suffix_match="radius.example.test"
               client_cert="/etc/freeradius-molecule-pki/{{ __freeradius_eap_fixture.certificate | default(__freeradius_eap_fixture.profile) }}.pem"
