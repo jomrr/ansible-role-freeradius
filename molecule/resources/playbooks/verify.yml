@@ -61,6 +61,8 @@
         - profile: staff
           result: accept
           vlan_hex: '313030'
+        - profile: rsa_key_transport
+          result: reject
         - profile: staff
           source: 127.0.0.3
           secret: molecule-unassigned-secret-2026

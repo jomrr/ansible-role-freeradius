@@ -98,6 +98,9 @@ provisioner:
         freeradius_users: []
         __freeradius_eap_fixtures:
           - profile: "staff"
+          - profile: "rsa_key_transport"
+            certificate: "staff"
+            ciphers: "AES128-GCM-SHA256"
           - profile: "guest"
             phase1: "tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0"
           - profile: "missing_policy"
