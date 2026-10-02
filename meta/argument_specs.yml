@@ -119,6 +119,17 @@ argument_specs:
         type: list
         elements: dict
         default: []
+        required_if:
+          - - service
+            - mab
+            - - vlan_id
+        mutually_exclusive:
+          - - vlan_id
+            - mikrotik_group
+          - - vlan_id
+            - framed_pool
+          - - vlan_id
+            - filter_id
         description: Named VPN and MAB reply profiles; values refer to resources already
           provisioned on the NAS. Optional reauthenticate (default false) sends Termination-Action
           RADIUS-Request only when session_timeout is set.

@@ -197,12 +197,7 @@
   ansible.builtin.assert:
     that:
       - __freeradius_profile.name is match('^[A-Za-z0-9_-]+\Z')
-      - __freeradius_profile.service != 'mab' or __freeradius_profile.vlan_id is defined
       - __freeradius_profile.service != 'vpn' or __freeradius_profile.vlan_id is not defined
-      - >-
-        __freeradius_profile.service != 'mab' or
-        (__freeradius_profile.mikrotik_group is not defined and __freeradius_profile.framed_pool is not defined
-        and __freeradius_profile.filter_id is not defined)
       - __freeradius_profile.vlan_id is not defined or (1 <= __freeradius_profile.vlan_id <= 4094)
       - __freeradius_profile.session_timeout is not defined or (1 <= __freeradius_profile.session_timeout <= 4294967295)
       - __freeradius_profile.idle_timeout is not defined or (1 <= __freeradius_profile.idle_timeout <= 4294967295)
