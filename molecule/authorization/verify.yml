@@ -33,6 +33,7 @@
             - Framed-Pool = "updated-pool"
             - Filter-Id = "updated-filter"
             - Session-Timeout = 1800
+            - Termination-Action = RADIUS-Request
             - Idle-Timeout = 300
         - name: aabbccddeeff / Access-Accept
           request: |
@@ -47,6 +48,8 @@
             - Tunnel-Type:0 = VLAN
             - Tunnel-Medium-Type:0 = IEEE-802
             - Tunnel-Private-Group-Id:0 = "310"
+            - Session-Timeout = 600
+            - Termination-Action = RADIUS-Request
         - name: 112233445566 / Access-Accept
           request: |
             User-Name = "112233445566"
@@ -60,6 +63,8 @@
             - Tunnel-Type:0 = VLAN
             - Tunnel-Medium-Type:0 = IEEE-802
             - Tunnel-Private-Group-Id:0 = "310"
+            - Session-Timeout = 600
+            - Termination-Action = RADIUS-Request
       loop_control:
         loop_var: __freeradius_case
         label: "{{ __freeradius_case.name }}"
@@ -67,8 +72,8 @@
       register: __freeradius_response
       failed_when: |-
         __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
-        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
-        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
-         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+        (__freeradius_case.reply | sort !=
+         (__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim') |
+          select('match', '^(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout|Termination-Action)') | sort))
   gather_subset:
     - min

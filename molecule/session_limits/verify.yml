@@ -107,7 +107,6 @@
                     - Tunnel-Type:0 = VLAN
                     - Tunnel-Medium-Type:0 = IEEE-802
                     - Tunnel-Private-Group-Id:0 = "300"
-                    - Session-Timeout = 600
                     - Idle-Timeout = 120
               loop_control:
                 loop_var: __freeradius_case

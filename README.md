@@ -169,7 +169,8 @@ freeradius_authorization_enabled: false
 Type: `list`. Required: `false`.
 
 Named VPN and MAB reply profiles; values refer to resources already provisioned
-on the NAS.
+on the NAS. Optional reauthenticate (default false) sends Termination-Action
+RADIUS-Request only when session_timeout is set.
 
 Default:
 
@@ -674,6 +675,9 @@ Create vpn-staff, vpn-pool and vpn-filter on the gateway.
 
 Example VLANs 300 and 999 need printer and quarantine firewall policies.
 Verify NAS request attributes before rollout.
+The printer profile omits session_timeout; quarantine terminates at its timeout.
+With verified NAS support, set session_timeout and reauthenticate: true on an
+approved profile to request reauthentication when its timer expires.
 
 ```yaml
 - name: Configure device admission

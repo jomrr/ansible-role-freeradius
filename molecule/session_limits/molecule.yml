@@ -60,7 +60,6 @@ provisioner:
           - name: "printers"
             kind: "mab"
             vlan_id: 300
-            session_timeout: 600
             idle_timeout: 120
           - name: "quarantine"
             kind: "mab"

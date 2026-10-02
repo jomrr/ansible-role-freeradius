@@ -120,7 +120,8 @@ argument_specs:
         elements: dict
         default: []
         description: Named VPN and MAB reply profiles; values refer to resources already
-          provisioned on the NAS.
+          provisioned on the NAS. Optional reauthenticate (default false) sends Termination-Action
+          RADIUS-Request only when session_timeout is set.
         options:
           name:
             type: str
@@ -151,6 +152,12 @@ argument_specs:
           session_timeout:
             type: int
             description: Optional Session-Timeout in seconds, from 1 to 4294967295.
+          reauthenticate:
+            type: bool
+            default: false
+            description: Request reauthentication at session_timeout via Termination-Action
+              RADIUS-Request. Only effective with session_timeout; enable only for NAS with
+              verified support.
           idle_timeout:
             type: int
             description: Optional Idle-Timeout in seconds, from 1 to 4294967295.

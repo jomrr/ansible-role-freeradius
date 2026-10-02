@@ -70,6 +70,9 @@ policy {
 {% endif %}
 {% if __freeradius_profile.session_timeout is defined %}
                 Session-Timeout := {{ __freeradius_profile.session_timeout }}
+{% if __freeradius_profile.reauthenticate | default(false) %}
+                Termination-Action := RADIUS-Request
+{% endif %}
 {% endif %}
 {% if __freeradius_profile.idle_timeout is defined %}
                 Idle-Timeout := {{ __freeradius_profile.idle_timeout }}

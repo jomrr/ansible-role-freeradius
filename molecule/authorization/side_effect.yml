@@ -14,10 +14,13 @@
         framed_pool: updated-pool
         filter_id: updated-filter
         session_timeout: 1800
+        reauthenticate: true
         idle_timeout: 300
       - name: printers
         kind: mab
         vlan_id: 310
+        session_timeout: 600
+        reauthenticate: true
       - name: quarantine
         kind: mab
         vlan_id: 998

@@ -86,6 +86,7 @@ freeradius_access_profiles: []
 #   framed_pool: vpn-pool
 #   filter_id: vpn-filter
 #   session_timeout: 3600
+#   reauthenticate: false
 # - name: printers
 #   kind: mab
 #   vlan_id: 100

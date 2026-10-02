@@ -304,7 +304,6 @@
             - Tunnel-Type:0 = VLAN
             - Tunnel-Medium-Type:0 = IEEE-802
             - Tunnel-Private-Group-Id:0 = "300"
-            - Session-Timeout = 600
             - Idle-Timeout = 120
         - name: unifi_wifi
           request: |
@@ -319,7 +318,6 @@
             - Tunnel-Type:0 = VLAN
             - Tunnel-Medium-Type:0 = IEEE-802
             - Tunnel-Private-Group-Id:0 = "300"
-            - Session-Timeout = 600
             - Idle-Timeout = 120
         - name: mikrotik_printer
           request: |
@@ -335,7 +333,6 @@
             - Tunnel-Type:0 = VLAN
             - Tunnel-Medium-Type:0 = IEEE-802
             - Tunnel-Private-Group-Id:0 = "300"
-            - Session-Timeout = 600
             - Idle-Timeout = 120
           secret: molecule-mikrotik-secret-2026
         - name: unknown_mac
@@ -464,9 +461,9 @@
       register: __freeradius_response
       failed_when: |-
         __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
-        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
-        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
-         search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
+        (__freeradius_case.reply | sort !=
+         (__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim') |
+          select('match', '^(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout|Termination-Action)') | sort))
 
     - name: FREERADIUS | Read admission audit events
       become: true
