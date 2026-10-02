@@ -364,6 +364,12 @@ server default {
     }
     post-auth {
         if (!&request:EAP-Message && &control:Auth-Type == PAP) {
+            # Read-only prevents concurrent successful requests recreating a deleted entry.
+            update control {
+                Cache-TTL := 0
+                Cache-Read-Only := yes
+            }
+            login_attempts
 {% if freeradius_simultaneous_use > 0 %}
             # SQL xlat escapes interpolated attributes. An empty result means failure.
             update control {
@@ -410,12 +416,6 @@ server default {
                 reject
             }
 {% endif %}
-            # Read-only prevents concurrent successful requests recreating a deleted entry.
-            update control {
-                Cache-TTL := 0
-                Cache-Read-Only := yes
-            }
-            login_attempts
         }
 {% if freeradius_authorization_enabled %}
         if (!&request:EAP-Message) {

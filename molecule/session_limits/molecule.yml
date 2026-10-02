@@ -45,7 +45,7 @@ provisioner:
           - oid: "1.3.6.1.4.1.32473.2"
             vlan_id: 200
         freeradius_failure_limit: 3
-        freeradius_failure_window: 30
+        freeradius_failure_window: 300
         freeradius_authorization_enabled: true
         freeradius_mab_enabled: true
         freeradius_mab_quarantine_profile: "quarantine"

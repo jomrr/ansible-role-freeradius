@@ -273,38 +273,31 @@
       delay: 2
       changed_when: false
 
-    - name: FREERADIUS | Verify the refreshed session again denies admission
+    - name: FREERADIUS | Repeat session rejections up to the failure limit
       ansible.builtin.command:
         argv:
           - radclient
           - -x
+          - -c
+          - "{{ freeradius_failure_limit | string }}"
           - -r
           - '1'
           - -t
           - '3'
-          - "127.0.0.1:{{ __freeradius_case.port | default(1812) }}"
+          - 127.0.0.1:1812
           - auth
-          - "{{ __freeradius_case.secret | default('molecule-radius-secret-2026') }}"
-        stdin: "{{ __freeradius_case.request }}"
-      loop:
-        - name: molecule / Access-Reject
-          request: |
-            User-Name = "molecule"
-            User-Password = "molecule-password"
-            Message-Authenticator = 0x00
-            Service-Type = "Framed-User"
-            Framed-Protocol = "PPP"
-          response: Access-Reject
-          reply: []
-      loop_control:
-        loop_var: __freeradius_case
-        label: "{{ __freeradius_case.name }}"
+          - molecule-radius-secret-2026
+        stdin: |
+          User-Name = "molecule"
+          User-Password = "molecule-password"
+          Message-Authenticator = 0x00
+          Service-Type = "Framed-User"
+          Framed-Protocol = "PPP"
       changed_when: false
-      register: __freeradius_response
+      register: __freeradius_session_rejects
       failed_when: |-
-        __freeradius_case.response not in (__freeradius_response.stdout ~ __freeradius_response.stderr) or
-        (__freeradius_case.reply | difference(__freeradius_response.stdout.split('Received ')[-1].splitlines() | map('trim')) | length > 0) or
-        (__freeradius_case.reply | length == 0 and __freeradius_response.stdout.split('Received ')[-1] is
+        (__freeradius_session_rejects.stdout | regex_findall('Received Access-Reject') | length != freeradius_failure_limit) or
+        (__freeradius_session_rejects.stdout is
          search('(?m)^\s*(Mikrotik-|Tunnel-|Framed-Pool|Filter-Id|Session-Timeout|Idle-Timeout)'))
 
     - name: FREERADIUS | Close the recovered session
