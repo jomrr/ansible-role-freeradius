@@ -16,15 +16,12 @@ provisioner:
       interpreter_python: "auto_silent"
       callbacks_enabled: "ansible.builtin.default"
       callback_result_format: "yaml"
-    ssh_connection:
+    connection:
       pipelining: true
-  log: true
-  playbooks:
-    prepare: "../resources/playbooks/prepare.yml"
-    converge: "../resources/playbooks/converge.yml"
-    verify: "verify.yml"
   inventory:
     group_vars:
+      all:
+        ansible_podman_mount_detection: false
       radius_servers:
         freeradius_accounting_enabled: false
         freeradius_accounting_backend: "detail"
@@ -85,6 +82,7 @@ provisioner:
             services:
               - "vpn"
               - "mab"
+              - "eap_tls"
             mab_service_type: "Call-Check"
           - name: "mikrotik_mab"
             address: "127.0.0.2"
@@ -114,6 +112,11 @@ provisioner:
           - profile: "qualified"
         freeradius_eap_tls_revocation: "ocsp"
         freeradius_eap_tls_ocsp_url: "http://127.0.0.1:8888/"
+  log: true
+  playbooks:
+    prepare: "../resources/playbooks/prepare.yml"
+    converge: "../resources/playbooks/converge.yml"
+    verify: "verify.yml"
 verifier:
   name: "ansible"
 scenario:

@@ -152,8 +152,9 @@ freeradius_users: []
 
 Type: `bool`. Required: `false`.
 
-Require a VPN profile grant after PAP authentication; false preserves
-credential-only PAP.
+Enforce client services for VPN, MAB and EAP-TLS and require VPN profile grants
+after PAP authentication. When false, PAP and EAP-TLS do not require client
+service grants.
 
 Default:
 
@@ -579,10 +580,11 @@ reapplied with the same inputs.
   freeradius_users are authoritative. An empty freeradius_users list disables
   local PAP authentication, while EAP-TLS and accounting remain independent of
   that list.
-- freeradius_authorization_enabled requires a matching user access grant and a
-  client with services: [vpn]. Profiles are applied only after successful
-  authentication and session checks. Disabled authorization preserves
-  credential-only PAP.
+- With freeradius_authorization_enabled, PAP requires a matching user access
+  grant and client service vpn; EAP-TLS requires client service eap_tls.
+  Profiles are applied after successful authentication and session checks. When
+  authorization is disabled, PAP and EAP-TLS do not require client service
+  grants.
 - freeradius_mab_enabled requires enabled authorization, client service mab and
   mab_service_type matching the NAS request. Valid MAC credentials without a
   matching device grant receive freeradius_mab_quarantine_profile; an empty
@@ -713,10 +715,12 @@ Provision PKI files first; use policy OIDs under the assigned PEN.
   roles:
     - role: jomrr.freeradius
       freeradius_listen_address: 192.0.2.10
+      freeradius_authorization_enabled: true
       freeradius_clients:
         - name: access_switch
           address: 192.0.2.20
           secret: "{{ vault_radius_client_secret }}"
+          services: [eap_tls]
       freeradius_eap_tls_enabled: true
       freeradius_eap_tls_certificate_file: /etc/radius-pki/server.pem
       freeradius_eap_tls_private_key_file: /etc/radius-pki/server.key

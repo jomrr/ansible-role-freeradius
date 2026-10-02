@@ -297,8 +297,18 @@ server default {
             update control {
                 Tmp-String-0 := "eap_tls"
             }
+{% if freeradius_authorization_enabled %}
+{% for __freeradius_client in freeradius_clients if 'eap_tls' in __freeradius_client.services | default([]) %}
+            if ("%{client:shortname}" == "{{ __freeradius_client.name }}") {
+                eap
+                return
+            }
+{% endfor %}
+            reject
+{% else %}
             eap
             return
+{% endif %}
 {% else %}
             reject
 {% endif %}

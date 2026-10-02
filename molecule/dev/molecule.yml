@@ -19,15 +19,12 @@ provisioner:
       display_ok_hosts: false
       display_skipped_hosts: false
       show_task_path_on_failure: true
-    ssh_connection:
+    connection:
       pipelining: true
-  log: true
-  playbooks:
-    prepare: "../resources/playbooks/prepare.yml"
-    converge: "../resources/playbooks/converge.yml"
-    verify: "../resources/playbooks/verify.yml"
   inventory:
     group_vars:
+      all:
+        ansible_podman_mount_detection: false
       radius_servers:
         freeradius_accounting_enabled: true
         freeradius_accounting_backend: "postgresql"
@@ -90,6 +87,7 @@ provisioner:
             services:
               - "vpn"
               - "mab"
+              - "eap_tls"
             mab_service_type: "Call-Check"
           - name: "mikrotik_mab"
             address: "127.0.0.2"
@@ -153,6 +151,11 @@ provisioner:
           - profile: "revoked"
           - profile: "expired"
           - profile: "qualified"
+  log: true
+  playbooks:
+    prepare: "../resources/playbooks/prepare.yml"
+    converge: "../resources/playbooks/converge.yml"
+    verify: "../resources/playbooks/verify.yml"
 verifier:
   name: "ansible"
 scenario:

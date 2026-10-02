@@ -45,9 +45,10 @@ argument_specs:
             choices:
               - vpn
               - mab
+              - eap_tls
             default: []
-            description: Explicit services allowed when profile authorization is enabled;
-              empty denies both services.
+            description: Explicit services allowed when authorization is enabled; empty
+              denies VPN, MAB and EAP-TLS.
           mab_service_type:
             type: str
             choices:
@@ -111,8 +112,9 @@ argument_specs:
       freeradius_authorization_enabled:
         type: bool
         default: false
-        description: Require a VPN profile grant after PAP authentication; false preserves
-          credential-only PAP.
+        description: Enforce client services for VPN, MAB and EAP-TLS and require VPN profile
+          grants after PAP authentication. When false, PAP and EAP-TLS do not require client
+          service grants.
       freeradius_access_profiles:
         type: list
         elements: dict

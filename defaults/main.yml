@@ -60,7 +60,7 @@ freeradius_clients: []
 # - name: access_switch
 #   address: 192.0.2.20
 #   secret: "{{ vault_radius_client_secret }}"
-#   services: [vpn, mab]
+#   services: [vpn, mab, eap_tls]
 #   mab_service_type: Call-Check
 
 # Default FreeRADIUS attribute for local PAP credentials.
@@ -75,7 +75,7 @@ freeradius_users: []
 #   access:
 #     - {client: access_switch, profile: vpn_staff}
 
-# Require client-specific VPN profile grants after successful PAP authentication.
+# Enforce client services for VPN, MAB and EAP-TLS, plus VPN profile grants for PAP.
 freeradius_authorization_enabled: false
 
 # Named VPN and MAB reply profiles referencing existing NAS resources.

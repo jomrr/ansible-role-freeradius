@@ -13,6 +13,7 @@
       ansible.builtin.shell: |
         set -o pipefail
         eapol_test -c /etc/freeradius-molecule-pki/eap-{{ __freeradius_eap_case.profile }}.conf \
+          -A {{ __freeradius_eap_case.source | quote }} \
           -p {{ __freeradius_eap_case.port | default(1812) | int }} \
           -s {{ __freeradius_eap_case.secret | default('molecule-radius-secret-2026') | quote }} -t 10 -r 1 2>&1 |
           LC_ALL=C tr -cd '\11\12\15\40-\176'
@@ -22,6 +23,8 @@
         - profile: revoked
           result: accept
           vlan_hex: '343030'
+          source: 127.0.0.3
+          secret: molecule-unassigned-secret-2026
       loop_control:
         loop_var: __freeradius_eap_case
         label: "{{ __freeradius_eap_case.profile }}"
