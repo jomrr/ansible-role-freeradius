@@ -37,8 +37,8 @@ freeradius_postgresql_user: radius
 # Choices: disable, require, verify-ca, verify-full
 freeradius_postgresql_ssl_mode: verify-full
 
-# CA certificate path on the RADIUS host; empty uses the libpq default.
-freeradius_postgresql_ssl_root_cert: ''
+# Optional CA certificate path on the RADIUS host; undefined uses the libpq default.
+# freeradius_postgresql_ssl_root_cert: /etc/ssl/certs/radius-db-ca.pem
 
 # Initialize the distribution schema and runtime grants using separate owner credentials.
 freeradius_postgresql_initialize_schema: false
@@ -111,6 +111,9 @@ freeradius_failure_window: 300
 
 # Enable certificate-only EAP-TLS alongside local PAP authentication.
 freeradius_eap_tls_enabled: false
+
+# Optional OpenSSL TLS 1.2 cipher list; undefined uses the OS-specific default.
+# freeradius_eap_tls_cipher_list: ECDHE+AESGCM:ECDHE+CHACHA20
 
 # Server certificate chain in PEM format on the RADIUS host, required for EAP-TLS.
 # freeradius_eap_tls_certificate_file: /etc/radius-pki/server.pem

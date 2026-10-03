@@ -10,7 +10,7 @@
       login_user: "{{ freeradius_postgresql_schema_user }}"
       login_password: "{{ freeradius_postgresql_schema_password }}"
       ssl_mode: "{{ freeradius_postgresql_ssl_mode }}"
-      ca_cert: "{{ freeradius_postgresql_ssl_root_cert or omit }}"
+      ca_cert: "{{ freeradius_postgresql_ssl_root_cert | default(omit) }}"
   block:
     - name: FREERADIUS | Inspect accounting ownership and runtime privileges
       become: true

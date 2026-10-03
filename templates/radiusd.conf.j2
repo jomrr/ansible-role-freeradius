@@ -173,7 +173,7 @@ modules {
             check_cert_issuer = "{{ freeradius_eap_tls_issuer }}"
             tls_min_version = "1.2"
             tls_max_version = "1.3"
-            cipher_list = "ECDHE+AESGCM:ECDHE+CHACHA20"
+            cipher_list = "{{ freeradius_eap_tls_cipher_list | default(__freeradius_eap_tls_cipher_list) }}"
             cipher_server_preference = yes
             cache {
                 enable = no
@@ -228,7 +228,7 @@ modules {
         port = {{ freeradius_postgresql_port }}
         login = "{{ freeradius_postgresql_user }}"
         password = "{{ freeradius_postgresql_password }}"
-        radius_db = "dbname='{{ freeradius_postgresql_database }}' sslmode={{ freeradius_postgresql_ssl_mode }}{% if freeradius_postgresql_ssl_root_cert %} sslrootcert='{{ freeradius_postgresql_ssl_root_cert }}'{% endif %}"
+        radius_db = "dbname='{{ freeradius_postgresql_database }}' sslmode={{ freeradius_postgresql_ssl_mode }}{% if freeradius_postgresql_ssl_root_cert is defined %} sslrootcert='{{ freeradius_postgresql_ssl_root_cert }}'{% endif %}"
         query_timeout = 5
         read_clients = no
         read_groups = no

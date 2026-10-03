@@ -155,6 +155,7 @@ provisioner:
             identity: "administrator"
           - profile: "expired"
           - profile: "qualified"
+        freeradius_eap_tls_cipher_list: "ECDHE+AESGCM:ECDHE+CHACHA20"
   log: true
   playbooks:
     prepare: "../resources/playbooks/prepare.yml"

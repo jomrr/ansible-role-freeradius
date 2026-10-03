@@ -13,4 +13,5 @@ __freeradius_user: freerad
 __freeradius_group: freerad
 __freeradius_log_dir: /var/log/freeradius
 __freeradius_postgresql_package: freeradius-postgresql
+__freeradius_eap_tls_cipher_list: ECDHE+AESGCM:ECDHE+CHACHA20
 __freeradius_validate_config: /usr/local/libexec/freeradius-validate-config /usr/sbin/freeradius /etc/freeradius/3.0 %s

@@ -62,10 +62,9 @@ UDP.
   mac-auth-mode=mac-as-username-and-password. Enable RADIUS-assigned VLANs in
   UniFi; provision VLANs and their isolation rules on both platforms.
 - EAP-TLS requires FreeRADIUS 3.2+, a PEM server certificate chain and key, and
-  a client CA bundle readable by the service account. TLS 1.2 clients must
-  support ECDHE with AES-GCM or ChaCha20-Poly1305; TLS 1.3 is also enabled. The
-  switch or AP must support standard RADIUS tunnel attributes for dynamic VLAN
-  assignment.
+  a client CA bundle readable by the service account. Clients must support the
+  configured TLS cipher policy; TLS 1.2 and TLS 1.3 are enabled. The switch or
+  AP must support standard RADIUS tunnel attributes for dynamic VLAN assignment.
 - PostgreSQL accounting requires an existing database and restricted runtime
   login. Use the distribution FreeRADIUS schema or let the role initialize it.
 - Schema initialization requires separate owner credentials and an existing
@@ -353,13 +352,8 @@ freeradius_postgresql_ssl_mode: verify-full
 
 Type: `path`. Required: `false`.
 
-Absolute CA certificate path on the RADIUS host; empty uses the libpq default.
-
-Default:
-
-```yaml
-freeradius_postgresql_ssl_root_cert: ''
-```
+Optional absolute CA certificate path on the RADIUS host; undefined uses the
+libpq default.
 
 ### `freeradius_postgresql_initialize_schema`
 
@@ -428,6 +422,14 @@ Default:
 ```yaml
 freeradius_eap_tls_enabled: false
 ```
+
+### `freeradius_eap_tls_cipher_list`
+
+Type: `str`. Required: `false`.
+
+Optional OpenSSL TLS 1.2 cipher list. Undefined uses PROFILE=SYSTEM on RedHat or
+ECDHE+AESGCM:ECDHE+CHACHA20 on Debian and Suse. TLS 1.3 cipher suites are
+configured by OpenSSL.
 
 ### `freeradius_eap_tls_certificate_file`
 

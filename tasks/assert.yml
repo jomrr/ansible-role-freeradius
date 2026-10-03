@@ -40,7 +40,7 @@
       - freeradius_postgresql_user is match('^[A-Za-z0-9_-]+\Z')
       - freeradius_postgresql_port >= 1
       - freeradius_postgresql_port <= 65535
-      - freeradius_postgresql_ssl_root_cert == '' or freeradius_postgresql_ssl_root_cert is match('^/[A-Za-z0-9_./-]+\Z')
+      - freeradius_postgresql_ssl_root_cert is not defined or freeradius_postgresql_ssl_root_cert is match('^/[A-Za-z0-9_./-]+\Z')
     quiet: true
   when: freeradius_accounting_backend == 'postgresql'
 
@@ -90,6 +90,7 @@
 - name: FREERADIUS | Validate EAP-TLS trust and revocation settings
   ansible.builtin.assert:
     that:
+      - freeradius_eap_tls_cipher_list is not defined or freeradius_eap_tls_cipher_list is match('^[A-Za-z0-9_:+!@=., -]+\Z')
       - freeradius_eap_tls_certificate_file is match('^/[A-Za-z0-9_./-]+\Z')
       - freeradius_eap_tls_private_key_file is match('^/[A-Za-z0-9_./-]+\Z')
       - freeradius_eap_tls_ca_file is match('^/[A-Za-z0-9_./-]+\Z')
