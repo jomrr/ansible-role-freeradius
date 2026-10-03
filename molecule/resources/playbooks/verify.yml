@@ -255,6 +255,8 @@
             Message-Authenticator = 0x00
             Service-Type = "Framed-User"
             Framed-Protocol = "PPP"
+            Calling-Station-Id = "vpn station=1"
+            NAS-Port-Id = "vpn port=1"
           response: Access-Accept
           reply:
             - Mikrotik-Group = "vpn-staff"
@@ -482,7 +484,10 @@
     - name: FREERADIUS | Verify VPN, MAC and EAP-TLS audit identity
       ansible.builtin.assert:
         that:
-          - "'stage=vpn profile=vpn_staff' in __freeradius_access_audit.stdout"
+          - >-
+            __freeradius_access_audit.stdout is search(
+            'event=radius_auth result=Access-Accept user_hex=6d6f6c6563756c65 '
+            ~ '[^\n]*stage=vpn profile=vpn_staff [^\n]*station_hex=76706e2073746174696f6e3d31 port_hex=76706e20706f72743d31(\s|$)')
           - "'stage=mab profile=printers mac=aabbccddeeff' in __freeradius_access_audit.stdout"
           - "'stage=mab_quarantine profile=quarantine mac=112233445566' in __freeradius_access_audit.stdout"
           - "'stage=mab_invalid' in __freeradius_access_audit.stdout"
